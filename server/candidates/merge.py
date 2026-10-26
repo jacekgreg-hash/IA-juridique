@@ -114,7 +114,12 @@ def apply_candidate_decision_to_produit(produit: dict, decision: dict, candidate
     """Reflète la décision dans produit.modele_candidate / statut (section 17 du cahier des charges).
 
     Un candidat n'est jamais écrit comme « confirme » : ce statut est réservé à une
-    vérification contre des données officielles (section 8, hiérarchie des preuves)."""
+    vérification contre des données officielles (section 8, hiérarchie des preuves).
+
+    Note (V2.14) : le statut « probable » écrit ici provient de la FUSION (classement
+    des candidats par preuves) ; le « probable » de server/evidence/engine.py provient
+    de la CORROBORATION vision+OCR d'un identifiant. Le champ porte l'un ou l'autre,
+    jamais les deux à la fois : la fusion passe toujours en dernier."""
     if decision.get('statut') not in ('candidat_fort', 'candidats_a_verifier') or not decision.get('candidat'):
         return
     top = next((c for c in candidates if c.get('id') == decision['candidat']), None)

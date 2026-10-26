@@ -71,3 +71,13 @@ def test_build_queries_with_and_without_brand():
     q2 = build_queries({**fast, 'marque': None}, ['P-6000'])
     assert q2 and 'chaussure de sport P-6000' in q2
     assert build_queries({'marque': None, 'objet': None, 'caracteristiques': []}, []) == []
+
+
+def test_mistral_ocr_markdown_lines_filter_image_artifacts():
+    # V2.14.1 : l'API laisse des placeholders « ![](img-0.jpeg) » quand
+    # include_image_base64=False — ils ne sont pas du texte lu sur la photo.
+    from server.ocr.mistral_ocr import _markdown_lines
+    md = '![img-0.jpeg](img-0.jpeg)\nP. 6000\n|Modele|P-6000|\n![img-1.png](img-1.png) Air Max\n'
+    lines = _markdown_lines(md)
+    assert lines == ['P. 6000', 'Modele', 'P-6000', 'Air Max']
+    assert _markdown_lines('![img-0.jpeg](img-0.jpeg)') == []

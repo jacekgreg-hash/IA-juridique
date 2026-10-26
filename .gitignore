@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Environnement / secrets (jamais commités)
+.env
+
+# Fichiers locaux de machine
+*.lnk
+Thumbs.db
+.DS_Store
+
+# Données de travail générées
+data/web_image_cache/

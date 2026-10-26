@@ -1,9 +1,9 @@
 from __future__ import annotations
-import hashlib, io, ipaddress, logging, os, socket, time
+import hashlib, io, ipaddress, logging, os, socket, threading, time
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 import requests
-from PIL import Image, ImageOps, ImageStat, ImageFilter
+from PIL import Image, ImageOps
 from server.candidates.web_search import ImageResult
 from server.candidates.engine import visual_feature_scores
 
@@ -14,7 +14,11 @@ MAX_BYTES=2_000_000; TIMEOUT=12; MAX_REDIRECTS=3
 # Cache : les images web sont des copies temporaires de travail, pas une base d'images.
 CACHE_MAX_FILES=int(os.getenv('WEB_IMAGE_CACHE_MAX_FILES','300'))
 CACHE_MAX_AGE_DAYS=float(os.getenv('WEB_IMAGE_CACHE_MAX_AGE_DAYS','7'))
-_purged=False
+# V2.14 : purge périodique. L'ancien drapeau « une seule purge par vie du process »
+# laissait le cache grossir sans limite sur un serveur longue durée.
+PURGE_EVERY=int(os.getenv('WEB_IMAGE_CACHE_PURGE_EVERY','50'))
+_purge_lock=threading.Lock()
+_download_count=0
 
 def _key(url): return CACHE_DIR/(hashlib.sha256(url.encode('utf-8')).hexdigest()+'.jpg')
 
@@ -51,11 +55,20 @@ def purge_cache(max_files=None,max_age_days=None):
         logger.warning("Web image cache purge failed",exc_info=True)
     return removed
 
+def _maybe_purge():
+    """Purge au premier téléchargement puis tous les PURGE_EVERY téléchargements."""
+    global _download_count
+    with _purge_lock:
+        _download_count+=1
+        n=_download_count
+    if n==1 or n % PURGE_EVERY==0:
+        purge_cache()
+
 def _fetch(url):
     """GET en suivant les redirections à la main, chacune revalidée par is_public_url."""
     for _ in range(MAX_REDIRECTS+1):
         if not is_public_url(url): return None
-        r=requests.get(url,timeout=TIMEOUT,headers={'User-Agent':'RITA-Vision/2.13'},stream=True,allow_redirects=False)
+        r=requests.get(url,timeout=TIMEOUT,headers={'User-Agent':'RITA-Vision/2.14'},stream=True,allow_redirects=False)
         if r.is_redirect or r.status_code in (301,302,303,307,308):
             loc=r.headers.get('location'); r.close()
             if not loc: return None
@@ -64,9 +77,8 @@ def _fetch(url):
     return None
 
 def download_image(url):
-    global _purged
     if not url.startswith(('http://','https://')): return None
-    if not _purged: _purged=True; purge_cache()
+    _maybe_purge()
     path=_key(url)
     if path.exists() and path.stat().st_size>0: return path
     try:
@@ -85,38 +97,39 @@ def download_image(url):
         logger.warning("Web image download failed for %s", url, exc_info=True)
         return None
 
-def _ahash(im,size=16):
-    g=ImageOps.grayscale(im).resize((size,size),Image.Resampling.BILINEAR); v=list(g.getdata()); m=sum(v)/len(v); return [1 if x>=m else 0 for x in v]
-def _phash(im,size=32):
-    g=ImageOps.grayscale(im).resize((size,size),Image.Resampling.BILINEAR); m=ImageStat.Stat(g).mean[0]; return [(x-m)/128.0 for x in g.getdata()]
-def _cos(a,b):
-    d=sum(x*y for x,y in zip(a,b)); na=sum(x*x for x in a)**.5; nb=sum(y*y for y in b)**.5
-    return 0.0 if not na or not nb else max(0.0,min(1.0,(d/(na*nb)+1)/2))
-def _edges(im,size=32):
-    g=ImageOps.grayscale(im).resize((size,size),Image.Resampling.BILINEAR).filter(ImageFilter.FIND_EDGES); v=list(g.getdata()); m=sum(v)/len(v); return [1 if x>=m*1.25 else 0 for x in v]
-def _edge_sim(a,b): return 1.0-sum(x!=y for x,y in zip(_edges(a),_edges(b)))/1024
-def _hist(im,bins=8):
-    im=im.convert('RGB').resize((64,64),Image.Resampling.BILINEAR); h=[0.0]*(bins*3)
-    for r,g,b in im.getdata(): h[r*bins//256]+=1; h[bins+g*bins//256]+=1; h[2*bins+b*bins//256]+=1
-    return [x/4096 for x in h]
-def _hist_i(a,b): return max(0.0,min(1.0,sum(min(x,y) for x,y in zip(a,b))/3.0))
-def compare(query,candidate):
+def _analyze(query,candidate):
+    """Une seule passe de caractéristiques visuelles -> (score, détails).
+
+    V2.14 : score_image() appelait compare() puis compare_details(), et chacun
+    recalculait visual_feature_scores() : la comparaison complète était doublée
+    pour chaque image web évaluée. Tout passe désormais par cette fonction.
+    Les fonctions _ahash/_phash/_cos/_edges/_hist locales (code dupliqué de
+    engine.py, jamais utilisé dans le score final) ont été supprimées.
+    """
     q=ImageOps.exif_transpose(query.convert('RGB')); c=ImageOps.exif_transpose(candidate.convert('RGB'))
-    if q.size==c.size and list(q.getdata())==list(c.getdata()): return 1.0
-    ah=1-sum(a!=b for a,b in zip(_ahash(q),_ahash(c)))/256
-    structure=_edge_sim(q,c); colors=_hist_i(_hist(q),_hist(c)); ph=_cos(_phash(q),_phash(c))
-    lq=ImageStat.Stat(ImageOps.grayscale(q).resize((32,32))).mean[0]; lc=ImageStat.Stat(ImageOps.grayscale(c).resize((32,32))).mean[0]; lum=max(0,1-abs(lq-lc)/255)
+    if q.size==c.size and list(q.getdata())==list(c.getdata()):
+        perfect={'type':'doublon_exact','ahash':1.0,'structure':1.0,'couleurs':1.0,'phash_coarse':1.0,'luminance':1.0,'local_max':1.0,'local_moyenne':1.0}
+        return 1.0,perfect
     f=visual_feature_scores(q,c)
-    return max(0,min(1,.12*f['ahash']+.28*f['structure']+.15*f['couleurs']+.15*f['phash_coarse']+.05*f['luminance']+.25*f['local_max']))
+    score=max(0,min(1,.12*f['ahash']+.28*f['structure']+.15*f['couleurs']+.15*f['phash_coarse']+.05*f['luminance']+.25*f['local_max']))
+    details={'type':'visuel_multicritere_local',**{k:round(float(v),3) for k,v in f.items()}}
+    return score,details
+
+def compare(query,candidate):
+    """Compatibilité : retourne uniquement le score (voir _analyze)."""
+    return _analyze(query,candidate)[0]
+
 def compare_details(query,candidate):
-    q=ImageOps.exif_transpose(query.convert('RGB')); c=ImageOps.exif_transpose(candidate.convert('RGB'))
-    if q.size==c.size and list(q.getdata())==list(c.getdata()): return {'type':'doublon_exact','ahash':1,'structure':1,'couleurs':1,'phash_coarse':1,'luminance':1}
-    f=visual_feature_scores(q,c); return {'type':'visuel_multicritere_local',**f}
+    """Compatibilité : retourne uniquement les détails (voir _analyze)."""
+    return _analyze(query,candidate)[1]
+
 def score_image(query,result):
     path=download_image(result.image_url)
     if not path: return 0.0,None,{}
     try:
-        with Image.open(path) as im: return compare(query,im),path,compare_details(query,im)
+        with Image.open(path) as im:
+            score,details=_analyze(query,im)
+            return score,path,details
     except Exception:
         logger.warning("Web image comparison failed for cached file %s", path, exc_info=True)
         return 0.0,None,{}

@@ -1,15 +1,25 @@
 from __future__ import annotations
+import os, time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 from server.candidates.web_search import BraveSearchProvider,SearXNGSearchProvider,build_queries,domain_weight,extract_product_models
 from server.candidates.visual_web import score_image
 from server.candidates.engine import clean,tokens
-from server.candidates.llm_extractor import extract as llm_extract
+from server.candidates.llm_extractor import extract as llm_extract, MAX_ITEMS as LLM_MAX_ITEMS
 
 def _brand_ok(text,brand): return bool(brand and clean(brand) in clean(text))
 def _model_key(model): return clean(model)
 def _best_model_title(model,title): return clean(model) in clean(title)
 def _independent_domains(urls): return len({urlparse(u).netloc.lower() for u in urls if u})
+
+# V2.14 : la recherche externe (surtout les téléchargements d'images) respecte un
+# budget de temps global. Avant : jusqu'à 24 images évaluées séquentiellement à
+# 12 s de timeout chacune, pire cas ~5 min — incompatible avec l'objectif
+# « analyse normale < 60 s » du cahier des charges (§22).
+EXTERNAL_DEADLINE_S=float(os.getenv('EXTERNAL_DEADLINE_S','20'))
+EXTERNAL_IMAGE_WORKERS=int(os.getenv('EXTERNAL_IMAGE_WORKERS','4'))
+EXTERNAL_MAX_IMAGES=int(os.getenv('EXTERNAL_MAX_IMAGES','24'))
 
 def search_external(vision,ocr_text,query_image=None,provider=None,fallback=None,limit=8):
     queries=build_queries(vision,ocr_text); primary=provider or SearXNGSearchProvider(); emergency=fallback or BraveSearchProvider(); used=[]; raw=[]; errors=[]; imgs=[]
@@ -27,15 +37,15 @@ def search_external(vision,ocr_text,query_image=None,provider=None,fallback=None
             try: raw.extend(emergency.search(q))
             except Exception as e: errors.append(f"{emergency.name}: {type(e).__name__}: {e}")
     if not primary.enabled and not emergency.enabled:
-        return {'statut':'desactive','provider_principal':primary.name,'providers_utilises':[],'queries':queries,'resultats':[],'images':[],'candidats':[],'erreurs':['SEARXNG_URL absent et BRAVE_SEARCH_API_KEY absent'],'brave_role':'secours_uniquement','llm_extraction':{'statut':'non_execute'}}
+        return {'statut':'desactive','provider_principal':primary.name,'providers_utilises':[],'queries':queries,'resultats':[],'images':[],'candidats':[],'erreurs':['SEARXNG_URL absent et BRAVE_SEARCH_API_KEY absent'],'brave_role':'secours_uniquement','llm_extraction':{'statut':'non_execute'},'meta':{'nb_requetes':0}}
 
     byurl={r.url:r for r in raw}; byimg={r.image_url:r for r in imgs}; brand=str(vision.get('marque') or '')
+    images_pool=list(byimg.values())[:EXTERNAL_MAX_IMAGES]
     # First pass: build compact sources for the single local text-LLM call.
     llm_sources=[]
     for i,row in enumerate(byurl.values(),1):
         llm_sources.append({'source_id':f'w{i}','title':row.title,'snippet':row.snippet,'url':row.url,'source':row.source})
-    base_n=len(llm_sources)
-    for j,img in enumerate(list(byimg.values())[:24],1):
+    for j,img in enumerate(images_pool,1):
         llm_sources.append({'source_id':f'i{j}','title':img.title,'snippet':img.page_url,'url':img.page_url,'source':img.source})
     # Deterministic extraction first. The text LLM is a fallback for ambiguous
     # product names, not a mandatory step. This avoids wasting ~30-60 s when
@@ -45,13 +55,15 @@ def search_external(vision,ocr_text,query_image=None,provider=None,fallback=None
         models=extract_product_models(f"{row.title} {row.snippet}",brand)
         if models:
             deterministic_by_id[f'w{i}']=models
-    for j,img in enumerate(list(byimg.values())[:24],1):
+    for j,img in enumerate(images_pool,1):
         models=extract_product_models(f"{img.title} {img.page_url}",brand)
         if models:
             deterministic_by_id[f'i{j}']=models
 
     need_llm = not any(deterministic_by_id.values())
-    llm_result = llm_extract(llm_sources[:16]) if need_llm else {'statut':'non_execute','raison':'references explicites deja detectees par Python','extractions':[]}
+    # V2.14.1 : la tranche doit suivre MAX_ITEMS de llm_extractor — avant, 16
+    # sources étaient envoyées alors que seules les 8 premières étaient traitées.
+    llm_result = llm_extract(llm_sources[:LLM_MAX_ITEMS]) if need_llm else {'statut':'non_execute','raison':'references explicites deja detectees par Python','extractions':[]}
     llm_by_id={x['source_id']:x for x in llm_result.get('extractions',[])}
 
     cmap=defaultdict(lambda:{'rows':[],'images':[],'urls':set(),'titles':[],'snips':[],'domains':set(),'llm':[]})
@@ -62,11 +74,26 @@ def search_external(vision,ocr_text,query_image=None,provider=None,fallback=None
             key=_model_key(model); b=cmap[key]; b['rows'].append(row); b['urls'].add(row.url); b['titles'].append(row.title); b['snips'].append(row.snippet); b['domains'].add(row.source or urlparse(row.url).netloc.lower())
             if sid in llm_by_id: b['llm'].append(llm_by_id[sid])
 
-    visual_rows=[]
-    if query_image is not None:
-        for j,img in enumerate(list(byimg.values())[:24],1):
-            vs,path,det=score_image(query_image,img)
-            if not vs: continue
+    # V2.14 : téléchargements/évaluations d'images concurrents sous budget de temps.
+    # pool.map préserve l'ordre ; chaque tâche vérifie la deadline avant de commencer,
+    # les suivantes sont simplement sautées (elles restent visibles dans meta).
+    visual_rows=[]; scored=[]; images_unscored=0
+    if query_image is not None and images_pool:
+        deadline=time.monotonic()+EXTERNAL_DEADLINE_S
+        def _score_one(j_img):
+            j,img=j_img
+            if time.monotonic()>deadline:
+                return j,img,0.0,None,{}
+            try:
+                vs,path,det=score_image(query_image,img)
+            except Exception:
+                vs,path,det=0.0,None,{}
+            return j,img,vs,path,det
+        with ThreadPoolExecutor(max_workers=max(1,EXTERNAL_IMAGE_WORKERS)) as pool:
+            for j,img,vs,path,det in pool.map(_score_one,enumerate(images_pool,1)):
+                if vs: scored.append((j,img,vs,path,det))
+                else: images_unscored+=1
+        for j,img,vs,path,det in scored:
             sid=f'i{j}'
             visual_rows.append({'title':img.title,'image_url':img.image_url,'page_url':img.page_url,'source':img.source,'similarite':round(vs,3),'details_visuels':{k:round(v,3) for k,v in det.items() if k!='type'},'type_preuve_visuelle':det.get('type'),'cache':str(path) if path else None})
             text=f"{img.title} {img.page_url}"; models=extract_product_models(text,brand)
@@ -116,4 +143,10 @@ def search_external(vision,ocr_text,query_image=None,provider=None,fallback=None
         score=max(0,min(1,score))
         candidates.append({'id':f'web:{key.lower()}','modele':model,'score':round(score,3),'source':'web','similarite_image_web':round(visual,3),'urls':list(b['urls'])[:8],'titres':list(dict.fromkeys(b['titles']))[:8],'extraits':list(dict.fromkeys(b['snips']))[:4],'domaines':list(b['domains'])[:8],'raisons':reasons,'contradictions':contradictions,'nb_domaines_independants':domains,'preuves_titre_modele':exact_title,'preuves_llm':len(b['llm']),'preuves_llm_certaines':llm_certain})
     candidates.sort(key=lambda x:x['score'],reverse=True); visual_rows.sort(key=lambda x:x['similarite'],reverse=True)
-    return {'statut':'ok' if candidates or visual_rows else ('erreur' if errors else 'aucun_resultat'),'provider_principal':primary.name,'providers_utilises':used,'queries':queries,'resultats':[{'title':x.title,'url':x.url,'snippet':x.snippet,'source':x.source} for x in list(byurl.values())[:20]],'images':visual_rows[:20],'candidats':candidates[:limit],'erreurs':errors,'brave_role':'secours_uniquement','llm_extraction':llm_result}
+    # V2.14 : compteur d'appels externes par analyse (§22 du cahier des charges :
+    # mesurer le coût d'un dossier). Les montants se déduisent des tarifs en vigueur.
+    meta={'nb_requetes':len(queries),'nb_resultats_texte':len(byurl),'nb_images_trouvees':len(images_pool),
+          'nb_images_evaluees':len(scored),'nb_images_non_evaluees':images_unscored,
+          'deadline_s':EXTERNAL_DEADLINE_S,'deadline_depassee':images_unscored>0,
+          'extraction_llm':llm_result.get('statut')}
+    return {'statut':'ok' if candidates or visual_rows else ('erreur' if errors else 'aucun_resultat'),'provider_principal':primary.name,'providers_utilises':used,'queries':queries,'resultats':[{'title':x.title,'url':x.url,'snippet':x.snippet,'source':x.source} for x in list(byurl.values())[:20]],'images':visual_rows[:20],'candidats':candidates[:limit],'erreurs':errors,'brave_role':'secours_uniquement','llm_extraction':llm_result,'meta':meta}

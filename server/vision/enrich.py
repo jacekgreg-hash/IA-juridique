@@ -9,7 +9,7 @@ Pourquoi ce module (V2.13.7) :
 * La légende brute (« The image shows a pair of ... on a white background »)
   faisait une très mauvaise requête de recherche.
 
-Tout est déterministe et reste de l'évidence faible : rien ici ne propose de
+Tout est déterministe et reste de l'evidence faible : rien ici ne propose de
 modèle ni de référence, et rien n'est tarifaire.
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ from server.utils.brands import find_brand
 CONF_OBJET_SEUL = 0.15
 CONF_OBJET_ET_MARQUE = 0.25
 
-# Graine de vocabulaire (à étendre avec le catalogue / le banc de test).
+# Graine de vocabulaire (à étendre avec le catalogue / le banc d'essai).
 _COLORS = (
     ('argenté', ('silver', 'argent', 'metallic silver')),
     ('noir', ('black', 'noir', 'noire')),
@@ -71,8 +71,8 @@ _OBJECTS = (
     (('watch', 'montre'), 'montre'),
     (('bag', 'backpack', 'handbag', 'sac'), 'sac'),
 )
-_CLAUSE_CUT = re.compile(r'\s+(?:with|on|against|sitting|placed|in|that|which|featuring|has|having|showing|next to|beside)\s+', re.I)
-_LEAD = re.compile(r'^(?:the\s+)?(?:image|picture|photo|photograph)\s+(?:shows|is|features|depicts|contains)\s+(?:(?:a|an)\s+(?:photograph|photo|picture)\s+of\s+)?', re.I)
+_CLAUSE_CUT = re.compile(r"\s+(?:with|on|against|sitting|placed|in|that|which|featuring|has|having|showing|next to|beside)\s+", re.I)
+_LEAD = re.compile(r"^(?:the\s+)?(?:image|picture|photo|photograph)\s+(?:shows|is|features|depicts|contains)\s+(?:(?:a|an)\s+(?:photograph|photo|picture)\s+of\s+)?", re.I)
 
 
 def _has_word(text_low: str, word: str) -> bool:
