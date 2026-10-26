@@ -63,3 +63,33 @@ def test_enrich_no_brand_anywhere():
     out = enrich_vision({'caption': 'A pair of sneakers.', 'marque': None}, [])
     assert out['marque'] is None and out['marque_source'] is None
     assert out['objet'] == 'chaussure de sport'
+
+
+# --- V2.14.1 : extension marques / catégories ---
+
+def test_v2141_new_brands_detected():
+    assert find_brand('montre de plongée Seiko automatique') == 'Seiko'
+    assert find_brand('un téléphone Nokia avec écran couleur') == 'Nokia'
+    assert find_brand('machine à café Nespresso compacte') == 'Nespresso'
+    assert find_brand('commode style IKEA en bois') == 'IKEA'
+
+
+def test_v2141_brandable_words_are_not_brands():
+    # Marques volontairement écartées de SEED_BRANDS : mots courants.
+    assert find_brand('four chairs around a table') is None      # pas 'Four'/Olympus...
+    assert find_brand('the head of the machine') is None        # 'Head' écartée
+    assert find_brand('mon frère et son vélo') is None          # 'Brother' écartée
+
+
+def test_v2141_furniture_and_appliance_categories():
+    assert object_category('La photographie montre une commode en bois avec cinq tiroirs') == 'commode'
+    assert object_category('une armoire deux portes en chêne massif') == 'armoire'
+    assert object_category('un four micro-ondes inox posé sur le plan de travail') == 'micro-ondes'
+    assert object_category('a washing machine with front loading') == 'machine à laver'
+    assert object_category('une perceuse visseuse sans fil') == 'perceuse'
+
+
+def test_v2141_specific_before_generic():
+    # l'ordre spécifique -> générique doit tenir
+    assert object_category('ordinateur portable avec clavier') == 'ordinateur portable'
+    assert object_category('ballon de football signé') == 'ballon'

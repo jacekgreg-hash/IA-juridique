@@ -57,19 +57,65 @@ _FEATURES = (
     ('écran', ('screen', 'display', 'écran')),
     ('bouton', ('button', 'buttons', 'bouton', 'boutons')),
     ('batterie', ('battery', 'batterie')),
+    # V2.14.1 : matières fréquentes hors textile/chaussure
+    ('bois', ('wood', 'wooden', 'bois')),
+    ('verre', ('glass', 'verre')),
+    ('rotin', ('rattan', 'rotin')),
+    ('tissu', ('fabric', 'tissu', 'textile')),
+    ('tiroirs', ('drawer', 'drawers', 'tiroir', 'tiroirs')),
 )
 # (motifs anglais/français dans la légende) -> catégorie française
+# Ordre : du plus spécifique au plus générique (premier motif gagnant).
 _OBJECTS = (
     (('sneaker', 'sneakers', 'trainer', 'trainers', 'running shoe', 'athletic shoe', 'basket', 'baskets'), 'chaussure de sport'),
     (('boot', 'boots', 'bottine', 'bottines'), 'botte'),
     (('shoe', 'shoes', 'chaussure', 'chaussures'), 'chaussure'),
     (('t-shirt', 'tshirt', 'shirt'), 'chemise ou t-shirt'),
     (('jacket', 'coat', 'veste', 'manteau'), 'veste'),
+    (('pants', 'trousers', 'jean', 'jeans', 'pantalon'), 'pantalon'),
+    (('dress', 'robe'), 'robe'),
+    (('sweater', 'pullover', 'pull'), 'pull'),
     (('drill', 'perceuse'), 'perceuse'),
-    (('smartphone', 'phone', 'téléphone'), 'téléphone'),
+    (('smartphone', 'phone', 'téléphone', 'telephone'), 'téléphone'),
     (('headphone', 'headphones', 'earbuds', 'casque'), 'casque audio'),
     (('watch', 'montre'), 'montre'),
     (('bag', 'backpack', 'handbag', 'sac'), 'sac'),
+    (('suitcase', 'luggage', 'valise'), 'valise'),
+    # V2.14.1 : électroménager (micro-ondes avant four : « four micro-ondes »)
+    (('microwave', 'micro-ondes', 'micro onde'), 'micro-ondes'),
+    (('oven', 'cuisinière', 'cuisiniere'), 'four'),
+    (('washing machine', 'machine à laver', 'machine a laver', 'lave-linge'), 'machine à laver'),
+    (('fridge', 'refrigerator', 'réfrigérateur', 'refrigérateur', 'frigidaire'), 'réfrigérateur'),
+    (('vacuum', 'aspirateur'), 'aspirateur'),
+    (('coffee machine', 'espresso machine', 'machine à café', 'machine a cafe', 'cafetière'), 'machine à café'),
+    (('kettle', 'bouilloire'), 'bouilloire'),
+    (('mixer', 'blender', 'mixeur'), 'mixeur'),
+    # V2.14.1 : informatique / image
+    (('laptop', 'ordinateur portable', 'notebook', 'macbook'), 'ordinateur portable'),
+    (('computer', 'ordinateur'), 'ordinateur'),
+    (('tablet', 'tablette'), 'tablette'),
+    (('television', 'télévision', 'televiseur'), 'télévision'),
+    (('printer', 'imprimante'), 'imprimante'),
+    (('keyboard', 'clavier'), 'clavier'),
+    # V2.14.1 : meubles et décoration
+    (('commode', 'dresser', 'chest of drawers'), 'commode'),
+    (('armoire', 'wardrobe', 'closet'), 'armoire'),
+    (('shelf', 'shelves', 'étagère', 'etagere', 'bookcase', 'bibliothèque'), 'étagère'),
+    (('sofa', 'couch', 'canapé', 'canape'), 'canapé'),
+    (('armchair', 'fauteuil'), 'fauteuil'),
+    (('chair', 'chaise', 'chaises'), 'chaise'),
+    (('table', 'tables'), 'table'),
+    (('bed', 'lit'), 'lit'),
+    (('mirror', 'miroir'), 'miroir'),
+    (('lamp', 'lampe', 'luminaire'), 'lampe'),
+    (('rug', 'carpet', 'tapis'), 'tapis'),
+    (('furniture', 'meuble', 'meubles'), 'meuble'),
+    # V2.14.1 : sport / jouets
+    (('bicycle', 'bike', 'vélo', 'velo'), 'vélo'),
+    (('racket', 'racquet', 'raquette'), 'raquette'),
+    (('football', 'soccer ball', 'ballon'), 'ballon'),
+    (('plush', 'teddy', 'peluche'), 'peluche'),
+    (('toy', 'jouet', 'jouets'), 'jouet'),
 )
 _CLAUSE_CUT = re.compile(r"\s+(?:with|on|against|sitting|placed|in|that|which|featuring|has|having|showing|next to|beside)\s+", re.I)
 _LEAD = re.compile(r"^(?:the\s+)?(?:image|picture|photo|photograph)\s+(?:shows|is|features|depicts|contains)\s+(?:(?:a|an)\s+(?:photograph|photo|picture)\s+of\s+)?", re.I)
@@ -101,8 +147,14 @@ def short_object_phrase(caption: str, limit: int = 90) -> str | None:
     return first or None
 
 
+# V2.14.1 : « La photographie montre un téléphone » — le verbe « montre » ne doit
+# pas être pris pour le nom « montre » (horlogerie). On neutralise la tournure de
+# légende avant la catégorisation.
+_SHOWS_VERB = re.compile(r"\b(?:la\s+(?:photographie|photo)|l'?image|cette\s+(?:photo|image)|la\s+figure)\s+montre\b", re.I)
+
+
 def object_category(caption: str) -> str | None:
-    low = str(caption or '').lower()
+    low = _SHOWS_VERB.sub(' ', str(caption or '').lower())
     for words, label in _OBJECTS:
         if any(_has_word(low, w) for w in words):
             return label

@@ -16,6 +16,31 @@ SEED_BRANDS: tuple[str, ...] = (
     'Nike', 'Adidas', 'Puma', 'New Balance', 'ASICS', 'Reebok', 'Converse',
     'Vans', 'Under Armour', 'Apple', 'Samsung', 'Sony', 'Bosch', 'Makita',
     'DeWalt', 'Canon', 'Nikon', 'Lego', 'Dyson', 'Philips', 'Xiaomi',
+    # V2.14.1 : horlogerie
+    'Seiko', 'Casio', 'Citizen', 'Swatch', 'Tissot', 'Timex', 'Fossil',
+    'Festina', 'Rolex',
+    # V2.14.1 : téléphonie / électronique
+    'Nokia', 'Motorola', 'OnePlus', 'Oppo', 'Alcatel', 'Wiko', 'HTC',
+    'Fairphone', 'LG', 'Panasonic', 'Toshiba',
+    # V2.14.1 : électroménager / cuisine
+    'Siemens', 'Miele', 'Electrolux', 'Whirlpool', 'Indesit', 'Brandt',
+    'Moulinex', 'Tefal', 'SEB', 'Rowenta', 'KitchenAid', 'Kenwood',
+    'Nespresso', 'Krups', 'Russell Hobbs',
+    # V2.14.1 : outillage
+    'Hilti', 'Facom', 'Stanley', 'Milwaukee', 'Ryobi', 'Einhell', 'Metabo',
+    'Black & Decker',
+    # V2.14.1 : audio
+    'JBL', 'Bose', 'Sennheiser', 'Beats', 'Marshall',
+    # V2.14.1 : informatique
+    'Lenovo', 'Asus', 'Acer', 'Dell', 'Logitech', 'Epson', 'TP-Link',
+    # V2.14.1 : sport / mode
+    'Salomon', 'Decathlon', 'Quechua', 'Wilson', 'Babolat', 'Mizuno',
+    'Fila', 'Kappa', 'Umbro', 'Skechers', 'Lacoste', 'Ralph Lauren',
+    "Levi's", 'Zara', 'Uniqlo', 'Timberland', 'Dr. Martens', 'Crocs',
+    'Birkenstock', 'Columbia', 'Patagonia', 'Clarks',
+    # V2.14.1 : meuble / déco / jouets
+    'IKEA', 'Conforama', 'Maisons du Monde', 'Playmobil', 'Fisher-Price',
+    'Hot Wheels', 'Ravensburger', 'Hasbro',
 )
 
 
