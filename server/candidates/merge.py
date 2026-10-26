@@ -30,6 +30,7 @@ def _new_group(item: dict, brand: str | None) -> dict:
         'similarite_image': None, 'type_preuve_visuelle': 'indisponible', 'details_visuels': {},
         'urls': [], 'titres': [], 'extraits': [], 'domaines': [],
         'sources': set(), 'preuves_llm': 0, 'preuves_llm_certaines': 0,
+        'corrobore_ocr': False,
     }
 
 
@@ -77,6 +78,9 @@ def merge_candidate_sources(local_candidates, web_candidates, vision) -> list[di
             g['details_visuels'] = item.get('details_visuels') or g['details_visuels']
         g['preuves_llm'] += int(item.get('preuves_llm') or 0)
         g['preuves_llm_certaines'] += int(item.get('preuves_llm_certaines') or 0)
+        # V2.14.2 : la corroboration OCR du web survit à la fusion (une seule
+        # source corroborée suffit — c'est une preuve sur le produit lui-même).
+        g['corrobore_ocr'] = bool(g.get('corrobore_ocr')) or bool(item.get('corrobore_ocr'))
     merged = []
     for g in groups:
         # La concordance entre sources est une couche de preuve distincte.

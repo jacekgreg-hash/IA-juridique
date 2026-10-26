@@ -149,6 +149,19 @@ _STOPWORDS_AFTER_MODEL={
     "sportswear","running","lifestyle","sneaker","sneakers","baskets","basket","trainers","training",
     "collection","officiel","officielle","official","boutique","shop","store","site","france",
     "nouveautes","nouveautés","nouveau","nouvelle","catalogue","magasin","accueil","home",
+    # V2.14.2 : mots-outils et descripteurs français qui suivaient la marque dans des
+    # extraits français et produisaient de faux modèles — « Seiko avec couleur de
+    # cadran orange » donnait « avec couleur de », « Seiko 5 cadran » donnait « 5cadran ».
+    "avec","sans","pour","par","sur","dans","sous","entre","vers","chez","des","une",
+    "couleur","couleurs","color","colour",
+    "style","modèle","modele","version","série","serie","gamme",
+    "cadran","bracelet","boitier","boîtier","lunette","aiguille","aiguilles",
+    "and","with","of","the","for",
+    # V2.14.2 (2) : bruit des banques d'images et descripteurs d'horlogerie/téléphonie
+    # « photo libre de droits », « Seiko 5 Sports automatique », « Nokia mobile ».
+    "libre","libres","droits","droit","royalty","free",
+    "automatique","automatic","automatik","quartz",
+    "mobile","smartphone","telephone","téléphone","portable",
 }
 
 def _norm_model(value: str) -> str:

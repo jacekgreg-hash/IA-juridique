@@ -59,3 +59,16 @@ def test_decision_never_confirms():
     apply_candidate_decision_to_produit(produit, candidate_decision(cands), cands)
     assert produit['modele_candidate'] == 'P-6000'
     assert produit['modele_statut'] == 'probable'      # jamais 'confirme'
+
+
+def test_ocr_corroboration_survives_merge():
+    # V2.14.2 : le drapeau corrobore_ocr posé par la recherche web doit survivre
+    # à la fusion avec les candidats locaux.
+    web = [{'id': 'web:nokia3310', 'modele': '3310 Cellular Phone', 'marque': 'Nokia',
+            'score': 0.5, 'source': 'web', 'corrobore_ocr': True}]
+    local = [{'id': 'local:p6000', 'modele': 'P-6000', 'marque': 'Nike', 'score': 0.4,
+              'source': 'fixture_regression_locale'}]
+    merged = merge_candidate_sources(local, web, {'marque': 'Nokia'})
+    top = {c['id']: c for c in merged}
+    assert top['candidate:nokia:3310cellularphone']['corrobore_ocr'] is True
+    assert top['candidate:nike:p6000']['corrobore_ocr'] is False

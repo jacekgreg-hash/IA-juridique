@@ -81,3 +81,25 @@ def test_mistral_ocr_markdown_lines_filter_image_artifacts():
     lines = _markdown_lines(md)
     assert lines == ['P. 6000', 'Modele', 'P-6000', 'Air Max']
     assert _markdown_lines('![img-0.jpeg](img-0.jpeg)') == []
+
+
+def test_french_prose_after_brand_is_not_a_model():
+    # V2.14.2 : extraits français — « Seiko avec couleur de cadran » donnait
+    # « avec couleur de », « Seiko 5 cadran orange » donnait « 5cadran ».
+    assert extract_product_models('Seiko avec couleur de cadran orange', 'Seiko') == []
+    assert extract_product_models('Seiko 5 cadran orange vif', 'Seiko') == []
+    # les vraies formes de modèle passent toujours
+    assert extract_product_models('Seiko 5 Sports GMT automatique', 'Seiko') == ['5 Sports GMT']
+    assert extract_product_models('Adidas Samba OG noir', 'Adidas') == ['Samba OG']
+
+
+def test_ocr_corroborates_web_model_codes():
+    # V2.14.2 : l'OCR lit « 3310e », le web propose « 3310 Cellular Phone » —
+    # égalité exacte impossible, la similarité des tokens à chiffres fait le pont.
+    from server.candidates.external import ocr_corroborates, _digit_tokens
+    toks = _digit_tokens(['NOKIA', '17:38', '3310e', 'orange™'])
+    assert toks == {'3310E'}                        # marque et heure sans valeur
+    assert ocr_corroborates('Nokia 3310 Cellular Phone', toks) is True
+    assert ocr_corroborates('Nokia 2660 Flip', toks) is False
+    assert ocr_corroborates('Nike P-1000', _digit_tokens(['P. 1111'])) is False
+    assert ocr_corroborates('Seiko 5 Sports', set()) is False  # sans OCR : jamais

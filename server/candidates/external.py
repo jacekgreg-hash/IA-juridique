@@ -5,13 +5,40 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 from server.candidates.web_search import BraveSearchProvider,SearXNGSearchProvider,build_queries,domain_weight,extract_product_models
 from server.candidates.visual_web import score_image
-from server.candidates.engine import clean,tokens
+from server.candidates.engine import clean,tokens,similarity
 from server.candidates.llm_extractor import extract as llm_extract, MAX_ITEMS as LLM_MAX_ITEMS
 
 def _brand_ok(text,brand): return bool(brand and clean(brand) in clean(text))
 def _model_key(model): return clean(model)
 def _best_model_title(model,title): return clean(model) in clean(title)
 def _independent_domains(urls): return len({urlparse(u).netloc.lower() for u in urls if u})
+
+def _digit_tokens(values) -> set[str]:
+    """Tokens (>=3 caractères) contenant au moins un chiffre : formes de code produit.
+
+    Les tokens purement alphabétiques sont écartés : corroborer un candidat web par
+    le simple nom de marque lu en OCR (« NOKIA ») n'apporte aucune information."""
+    out=set()
+    for v in values or []:
+        for t in tokens(v):
+            if len(t)>=3 and any(c.isdigit() for c in t):
+                out.add(t)
+    return out
+
+def ocr_corroborates(model: str, ocr_digit_tokens: set[str]) -> bool:
+    """Vrai si un code du modèle candidat est quasi présent dans le texte OCR.
+
+    Pont V2.14.2 : l'OCR lit « 3310e » sur le téléphone, le web propose
+    « 3310 Cellular Phone » — égalité exacte impossible, similarité 0.89.
+    Seuls les tokens à chiffres des deux côtés sont comparés (seuil 0.85,
+    empiriquement : « 3310 »/« 3310E » passe, « 6000 »/« 1111 » ne passe pas)."""
+    if not ocr_digit_tokens:
+        return False
+    for mt in _digit_tokens([model]):
+        for ot in ocr_digit_tokens:
+            if similarity(mt, ot) >= .85:
+                return True
+    return False
 
 # V2.14 : la recherche externe (surtout les téléchargements d'images) respecte un
 # budget de temps global. Avant : jusqu'à 24 images évaluées séquentiellement à
@@ -103,6 +130,8 @@ def search_external(vision,ocr_text,query_image=None,provider=None,fallback=None
                 if sid in llm_by_id: b['llm'].append(llm_by_id[sid])
 
     candidates=[]
+    # V2.14.2 : pont OCR <-> web — les codes lus sur la photo corroborent un candidat.
+    ocr_digit_tokens=_digit_tokens(ocr_text)
     for key,b in cmap.items():
         if not b['rows'] and not b['images']: continue
         model=next((x['modele'] for x in b['llm'] if x.get('modele')),None) or next((m for m in extract_product_models(' | '.join(b['titles']),brand) if _model_key(m)==key),key)
@@ -140,8 +169,12 @@ def search_external(vision,ocr_text,query_image=None,provider=None,fallback=None
         # Multiple sources with the same exact model in product titles are meaningful,
         # but less than cross-modal evidence.
         if exact_title>=2: score+=.08; reasons.append('titre modèle répété')
+        # V2.14.2 : le texte lu sur la photo (preuve OCR) contient quasi le même code
+        # que le modèle proposé par le web — corroboration inter-preuves.
+        ocr_ok=ocr_corroborates(model,ocr_digit_tokens)
+        if ocr_ok: score+=.12; reasons.append('code modèle corroboré par le texte OCR de la photo')
         score=max(0,min(1,score))
-        candidates.append({'id':f'web:{key.lower()}','modele':model,'score':round(score,3),'source':'web','similarite_image_web':round(visual,3),'urls':list(b['urls'])[:8],'titres':list(dict.fromkeys(b['titles']))[:8],'extraits':list(dict.fromkeys(b['snips']))[:4],'domaines':list(b['domains'])[:8],'raisons':reasons,'contradictions':contradictions,'nb_domaines_independants':domains,'preuves_titre_modele':exact_title,'preuves_llm':len(b['llm']),'preuves_llm_certaines':llm_certain})
+        candidates.append({'id':f'web:{key.lower()}','modele':model,'score':round(score,3),'source':'web','similarite_image_web':round(visual,3),'urls':list(b['urls'])[:8],'titres':list(dict.fromkeys(b['titles']))[:8],'extraits':list(dict.fromkeys(b['snips']))[:4],'domaines':list(b['domains'])[:8],'raisons':reasons,'contradictions':contradictions,'nb_domaines_independants':domains,'preuves_titre_modele':exact_title,'preuves_llm':len(b['llm']),'preuves_llm_certaines':llm_certain,'corrobore_ocr':ocr_ok})
     candidates.sort(key=lambda x:x['score'],reverse=True); visual_rows.sort(key=lambda x:x['similarite'],reverse=True)
     # V2.14 : compteur d'appels externes par analyse (§22 du cahier des charges :
     # mesurer le coût d'un dossier). Les montants se déduisent des tarifs en vigueur.
