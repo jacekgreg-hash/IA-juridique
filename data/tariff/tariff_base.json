@@ -1,0 +1,112 @@
+{
+  "version": "2026.10-prototype",
+  "source": "base d'essai prototype (codes HS/TARIC simplifiés, à remplacer par le TARIC officiel)",
+  "date_validite": "2026-10-26",
+  "familles": {
+    "chaussures": {
+      "natures": ["chaussure de sport", "chaussure", "botte"],
+      "discriminant": "tige",
+      "question_tige": "Quelle est la matière de la tige (la partie supérieure) de la chaussure ?",
+      "codes": [
+        {
+          "code": "6403 40 00",
+          "designation": "Chaussures de sport à semelles en caoutchouc ou plastiques, tige en cuir naturel",
+          "tige": "cuir",
+          "taux_indicatif_droits": "0.00",
+          "notes": "tige cuir => 6403 ; le taux indicatif dépend de l'origine (préférences UE)"
+        },
+        {
+          "code": "6404 11 00",
+          "designation": "Chaussures de sport à semelles en caoutchouc ou plastiques, tige en textile",
+          "tige": "textile",
+          "taux_indicatif_droits": "0.17",
+          "notes": "tige textile => 6404 ; l'une des familles les plus taxées du chapitre 64"
+        },
+        {
+          "code": "6402 19 00",
+          "designation": "Chaussures de sport à semelles et tige en caoutchouc ou plastique",
+          "tige": "plastique/caoutchouc",
+          "taux_indicatif_droits": "0.00",
+          "notes": "tige plastique/caoutchouc => 6402"
+        }
+      ]
+    },
+    "telephonie": {
+      "natures": ["téléphone"],
+      "discriminant": "type_appareil",
+      "question_type_appareil": "S'agit-il d'un smartphone (écran tactile) ou d'un téléphone classique à clavier ?",
+      "codes": [
+        {
+          "code": "8517 13 00",
+          "designation": "Téléphones intelligents (smartphones) pour réseaux cellulaires",
+          "type_appareil": "smartphone",
+          "taux_indicatif_droits": "0.00",
+          "notes": "smartphone = écran tactile, système d'exploitation complet"
+        },
+        {
+          "code": "8517 14 00",
+          "designation": "Autres téléphones pour réseaux cellulaires (téléphones à clavier)",
+          "type_appareil": "classique",
+          "taux_indicatif_droits": "0.00",
+          "notes": "téléphone classique/feature phone avec clavier physique"
+        }
+      ]
+    },
+    "horlogerie": {
+      "natures": ["montre"],
+      "discriminant": "mouvement",
+      "question_mouvement": "Quel est le mouvement de la montre : automatique/mécanique, à quartz analogique, ou à affichage numérique ?",
+      "codes": [
+        {
+          "code": "9101 21 00",
+          "designation": "Montres-bracelets à remontage automatique (mécaniques, non électriques)",
+          "mouvement": "automatique",
+          "taux_indicatif_droits": "0.045",
+          "notes": "« Automatic » sur le cadran => remontage automatique => 9101"
+        },
+        {
+          "code": "9102 19 00",
+          "designation": "Autres montres-bracelets électriques (quartz analogique)",
+          "mouvement": "quartz",
+          "taux_indicatif_droits": "0.045",
+          "notes": "montre électrique autre qu'à affichage numérique"
+        },
+        {
+          "code": "9102 21 00",
+          "designation": "Montres-bracelets électriques à affichage numérique",
+          "mouvement": "numerique",
+          "taux_indicatif_droits": "0.045",
+          "notes": "cadran à cristaux liquides (LCD)"
+        }
+      ]
+    },
+    "meubles": {
+      "natures": ["commode", "armoire", "étagère", "canapé", "fauteuil", "chaise", "table", "lit", "meuble"],
+      "discriminant": "matiere_principale",
+      "question_matiere_principale": "Quelle est la matière principale du meuble : bois, plastique ou métal ?",
+      "codes": [
+        {
+          "code": "9403 60 00",
+          "designation": "Autres meubles et leurs parties, en bois (chambre à coucher, salle à manger...)",
+          "matiere_principale": "bois",
+          "taux_indicatif_droits": "0.00",
+          "notes": "commode/armoire en bois => position 9403.60"
+        },
+        {
+          "code": "9403 70 00",
+          "designation": "Meubles en plastiques",
+          "matiere_principale": "plastique",
+          "taux_indicatif_droits": "0.00",
+          "notes": "meuble dont la structure est en plastique"
+        },
+        {
+          "code": "9403 20 00",
+          "designation": "Autres meubles en métal",
+          "matiere_principale": "métal",
+          "taux_indicatif_droits": "0.00",
+          "notes": "meuble à structure métallique (classement distinct du mobilier de bureau métallique 9403.10)"
+        }
+      ]
+    }
+  }
+}

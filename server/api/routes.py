@@ -8,11 +8,13 @@ from server.candidates.external import search_external
 from server.candidates.merge import merge_candidate_sources, candidate_decision, apply_candidate_decision_to_produit
 from server.fusion.engine import fuse
 from server.ocr.select import ocr_detailed
+from server.persistence import store
+from server.tariff.engine import propose_classement
 from server.vision.enrich import enrich_vision
 from server.vision.select import MODEL, analyze
 
 router=APIRouter()
-APP_VERSION='2.14.0'
+APP_VERSION='3.0.0'
 VERSION=(f'RITA Vision V{APP_VERSION} — moteurs interchangeables '
          f'(vision: {os.getenv("VISION_ENGINE","florence")}, ocr: {os.getenv("OCR_ENGINE","paddle")}, '
          f'llm: {os.getenv("TEXT_LLM_PROVIDER","ollama")}) + SearXNG + fusion de preuves')
@@ -100,6 +102,15 @@ def analysis(image: UploadFile=File(...)):
         # Une seule identification unifiée (cahier des charges, section 17) : la décision
         # fondée sur les preuves est reflétée dans `produit`, sans jamais écrire « confirme ».
         apply_candidate_decision_to_produit(response['produit'],decision,candidate_search)
+        # V3 : classification tarifaire (§9/§10/§11) — moteur séparé de l'IA, base
+        # de données séparée du code, candidats multiples et questions ciblées.
+        response['classement']=propose_classement(response['produit'],vision['fast'].get('caption') or '',ocr_text)
+        # V3 : persistance (§20/§21/§24) — l'analyse est conservée et devient
+        # consultable via GET /api/v1/history et GET /api/v1/analysis/{id}.
+        try:
+            response['id_analyse']=store.save_analysis(response,image.filename or '')
+        except Exception:
+            response['id_analyse']=None  # la persistance ne doit jamais casser l'analyse
         return response
     except HTTPException:
         raise
@@ -108,3 +119,18 @@ def analysis(image: UploadFile=File(...)):
     finally:
         try:path.unlink()
         except OSError:pass
+
+# --- V3 : historique et consultation (§20 GET /history, GET /analysis/{id}) ---
+
+@router.get('/api/v1/history')
+def history(limit: int=20):
+    """Historique des analyses (§24) : lignes résumées, plus récentes d'abord."""
+    return {'analyses':store.list_history(limit=limit)}
+
+@router.get('/api/v1/analysis/{aid}')
+def analysis_detail(aid: str):
+    """Résultat complet d'une analyse conservée (photos non stockées, §25)."""
+    payload=store.get_analysis(aid)
+    if payload is None:
+        raise HTTPException(status_code=404,detail='Analyse inconnue')
+    return payload

@@ -13,3 +13,5 @@ Thumbs.db
 
 # Données de travail générées
 data/web_image_cache/
+data/rita.sqlite
+*.sqlite
