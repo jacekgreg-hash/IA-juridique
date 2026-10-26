@@ -1,0 +1,8 @@
+transformers==4.49.0
+accelerate>=1.10.1
+torch>=2.8.0
+torchvision
+einops
+timm
+safetensors>=0.6.2
+Pillow>=11.3

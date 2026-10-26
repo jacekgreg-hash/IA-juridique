@@ -1,0 +1,8 @@
+fastapi>=0.116
+uvicorn[standard]>=0.35
+python-multipart>=0.0.20
+requests>=2.32
+Pillow>=11.3
+pydantic>=2.11
+
+python-dotenv>=1.1

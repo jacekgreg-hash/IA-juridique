@@ -1,0 +1,27 @@
+{
+  "catalog_version": "0.3-v29-visual-profiles",
+  "warning": "Catalogue local de démonstration. Ne constitue pas une base commerciale ni douanière.",
+  "products": [
+    {
+      "id": "nike-p-6000",
+      "brand": "Nike",
+      "object": "chaussure de sport",
+      "model": "P-6000",
+      "reference": null,
+      "characteristics": ["argenté", "noir", "chaussure de sport", "semelle épaisse", "lacets"],
+      "visual_profile": ["chaussure running rétro", "multiples empiècements", "panneaux superposés", "empiècements métalliques", "Swoosh latéral", "semelle intermédiaire épaisse", "semelle extérieure segmentée", "lacets", "forme basse", "mesh", "aspect argenté"],
+      "image": "NIKE-P-6000.jpg",
+      "source": "fixture_regression_locale"
+    },
+    {
+      "id": "nike-p-1000-decoy",
+      "brand": "Nike",
+      "object": "chaussure de sport",
+      "model": "P-1000",
+      "reference": null,
+      "characteristics": ["chaussure de sport"],
+      "image": null,
+      "source": "fixture_decoy"
+    }
+  ]
+}
