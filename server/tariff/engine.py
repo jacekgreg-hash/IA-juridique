@@ -22,6 +22,8 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
+from server.tariff.search import rechercher
+
 _BASE_PATH = Path(__file__).resolve().parents[2] / 'data' / 'tariff' / 'tariff_base.json'
 
 # Attribution des valeurs de discriminant : mots observés dans les preuves
@@ -96,8 +98,30 @@ def propose_classement(produit: dict, caption: str = '', ocr_text: list | None =
         'informations_manquantes': [],
     }
     if not family:
-        result['informations_manquantes'] = ['nature de la marchandise (aucune famille tarifaire ne peut être proposée sans elle)']
+        # Aucune famille codée ne correspond : essai par désignation dans la
+        # nomenclature officielle (§9 : proposer des candidats plutôt que
+        # d'abandonner) — preuve faible, à départager par l'utilisateur (§29).
         result['raison'] = 'nature de la marchandise inconnue ou hors familles couvertes par la base'
+        texts = [nature,
+                 str(produit.get('caracteristiques') or []),
+                 str(produit.get('matiere_composition') or ''),
+                 str(produit.get('usage_fonction') or ''),
+                 caption] + list(ocr_text or [])
+        recherche = rechercher(texts)
+        if recherche['candidats']:
+            result['statut'] = 'candidats_a_departager'
+            result['candidats'] = recherche['candidats']
+            result['recherche'] = 'designation'
+            result['questions'] = [{'champ': 'nature',
+                                   'question': 'Quelle est la nature précise de la marchandise ?',
+                                   'impact': "confirme ou écarte les positions trouvées par recherche "
+                                             'de désignation dans la nomenclature officielle'}]
+            result['informations_manquantes'] = ['nature précise de la marchandise '
+                                                 '(candidats issus d\'une recherche par désignation)']
+        else:
+            result['informations_manquantes'] = ['nature de la marchandise (aucune famille tarifaire ne peut être proposée sans elle)']
+            if recherche.get('raison'):
+                result['raison'] += ' ; ' + recherche['raison']
         return result
 
     result['famille'] = family_key

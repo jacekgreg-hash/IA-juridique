@@ -246,6 +246,12 @@ def _arbre(entrees: list[dict]) -> None:
         fragments = [p['designation'] for p in parents if p['niveau'] >= 4] + [e['designation']]
         e['designation_complete'] = ', '.join(x for x in fragments if x)
         e['codes_parents'] = [p['code10'] for p in parents]
+        # Position tarifaire (fragment HS4) : le « nom » du produit ; sert à la
+        # recherche par désignation à distinguer le produit de ses mentions
+        # accessoires (ex. « casques » dans la position 8518 vs « en casque »
+        # dans une désignation de viande).
+        e['position'] = next((p['designation'] for p in parents if p['niveau'] >= 4),
+                              e['designation'])
         pile.append(e)
 
 
@@ -317,6 +323,7 @@ def _ecrire_nomenclature(entrees, declarables, droits, version, reference):
             'code10': e['code10'],
             'niveau': e['niveau'],
             'designation': e['designation_complete'],
+            'position': e['position'],
             'declarable': f"{e['code10']} 80" in declarables,
             'taux_pays_tiers': droit['taux'] if droit else None,
             'droit_pays_tiers_brut': droit['brut'] if droit else None,
