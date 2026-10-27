@@ -31,11 +31,13 @@ Sans argument, prend le eu-taric-*.zip le plus récent dans data/tariff/raw/.
 """
 from __future__ import annotations
 
+import gc
 import json
 import re
 import sqlite3
 import sys
 import zipfile
+import html
 import io
 from datetime import date, datetime
 from pathlib import Path
@@ -47,6 +49,7 @@ RAW_DIR = ROOT / 'data' / 'tariff' / 'raw'
 OUT_NOMENCLATURE = ROOT / 'data' / 'tariff' / 'nomenclature_fr.json'
 OUT_BASE = ROOT / 'data' / 'tariff' / 'tariff_base.json'
 OUT_FISCAL = ROOT / 'data' / 'tariff' / 'fiscal.sqlite'
+OUT_NOTES = ROOT / 'data' / 'tariff' / 'notes_cn_fr.json'
 
 # Types de mesures conservés pour le moteur fiscal (§16) — codes TARIC
 # officiels : 103 droit de pays tiers, 142 préférence tarifaire,
@@ -179,7 +182,7 @@ def _lire_zip() -> tuple[zipfile.ZipFile, Path]:
         if not candidats:
             sys.exit(f"Aucun eu-taric-*.zip dans {RAW_DIR} — passez le chemin en argument.")
         chemin = candidats[-1]
-    print(f"[1/5] Source : {chemin}")
+    print(f"[1/7] Source : {chemin}")
     return zipfile.ZipFile(chemin), chemin
 
 
@@ -204,7 +207,7 @@ def _lire_nomenclature(z: zipfile.ZipFile) -> list[dict]:
     Colonne « Hier. Pos. » : niveau du code (2 chapitre, 4 position HS, 6 sous-
     position HS, 8 CN8, 10 TARIC10) ; l'arbre réel suit l'indentation.
     """
-    print('[2/5] Lecture de « Nomenclature FR »...')
+    print('[2/7] Lecture de « Nomenclature FR »...')
     wb = load_workbook(io.BytesIO(z.read('Nomenclature FR.xlsx')), read_only=True)
     ws = wb[wb.sheetnames[0]]
     aujourd_hui = date.today()
@@ -256,7 +259,7 @@ def _arbre(entrees: list[dict]) -> None:
 
 
 def _lire_declarables(z: zipfile.ZipFile) -> set[str]:
-    print('[3/5] Lecture de « Declarable codes »...')
+    print('[3/7] Lecture de « Declarable codes »...')
     wb = load_workbook(io.BytesIO(z.read('Declarable codes.xlsx')), read_only=True)
     ws = wb[wb.sheetnames[0]]
     declarables = set()
@@ -273,7 +276,7 @@ def _lire_declarables(z: zipfile.ZipFile) -> set[str]:
 
 def _lire_droits(z: zipfile.ZipFile) -> dict[str, dict]:
     """Droits de pays tiers (103, ERGA OMNES) par code 10 chiffres, valides aujourd'hui."""
-    print('[4/5] Lecture de « Duties Import 01-99 » (mesure 103 ERGA OMNES)...')
+    print('[4/7] Lecture de « Duties Import 01-99 » (mesure 103 ERGA OMNES)...')
     wb = load_workbook(io.BytesIO(z.read('Duties Import 01-99.xlsx')), read_only=True)
     ws = wb[wb.sheetnames[0]]
     aujourd_hui = date.today()
@@ -308,7 +311,7 @@ def _droit_cascade(code10: str, parents: list[str], droits: dict[str, dict]) -> 
 # --- Écriture des sorties -------------------------------------------------------
 
 def _ecrire_nomenclature(entrees, declarables, droits, version, reference):
-    print(f"[6/6] Écriture de {OUT_NOMENCLATURE.name} et {OUT_BASE.name}...")
+    print(f"[7/7] Écriture de {OUT_NOMENCLATURE.name} et {OUT_BASE.name}...")
     codes = []
     for e in entrees:
         # Codes déclarables en douane (suffixe 80 + IS_LEAF=1) : CN8 et TARIC10.
@@ -339,7 +342,8 @@ def _ecrire_nomenclature(entrees, declarables, droits, version, reference):
                 'taux indicatif, le calcul fiscal dépend de l\'origine (accords, préférences, antidumping).',
         'codes': codes,
     }
-    OUT_NOMENCLATURE.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding='utf-8')
+    with open(OUT_NOMENCLATURE, 'w', encoding='utf-8') as f:
+        json.dump(doc, f, ensure_ascii=False, indent=1)
     print(f"      {len(codes)} codes CN8/TARIC10 -> {OUT_NOMENCLATURE.name} "
           f"({OUT_NOMENCLATURE.stat().st_size / 1e6:.1f} Mo)")
     return {c['code10']: c for c in codes}
@@ -398,7 +402,7 @@ def _ecrire_fiscal(z: zipfile.ZipFile, version: str, reference: str) -> None:
     * groupes(geo, nom) — nom FR des groupes d'origine.
     * meta(clé, valeur) — version TARIC et date de référence.
     """
-    print('[5/6] Construction de la base fiscale...')
+    print('[5/7] Construction de la base fiscale...')
     aujourd_hui = date.today()
     OUT_FISCAL.unlink(missing_ok=True)
     con = sqlite3.connect(OUT_FISCAL)
@@ -465,6 +469,67 @@ def _ecrire_fiscal(z: zipfile.ZipFile, version: str, reference: str) -> None:
     print(f'      {nb} mesures fiscales -> {OUT_FISCAL.name} ({OUT_FISCAL.stat().st_size / 1e6:.1f} Mo)')
 
 
+# --- Notes explicatives de la CN (vocabulaire officiel d'interprétation) --------
+
+def _ecrire_notes() -> None:
+    """notes_cn_fr.json : notes explicatives de la nomenclature combinée (FR).
+
+    Source : texte consolidé FR des NENC (CELEX 52019XC0329(02), Office des
+    publications de l'UE) déposé dans data/tariff/raw/cnen-fr*.html. Les notes
+    explicatives utilisent le vocabulaire courant absent de la nomenclature
+    (ex. « chaudières électriques qui produisent uniquement de l'eau chaude »
+    — les bouilloires — pour 8516 10 11/80) : elles font le pont entre le
+    langage courant et les désignations officielles.
+
+    Le fichier est un tableau : 1re cellule = code(s) (parfois une plage « à »),
+    2e cellule = texte officiel.
+    """
+    candidats_html = sorted(RAW_DIR.glob('cnen-fr*.html'))
+    if not candidats_html:
+        print('[6/7] Notes explicatives : aucun cnen-fr*.html dans data/tariff/raw/ — ignorées.')
+        OUT_NOTES.unlink(missing_ok=True)
+        return
+    chemin = candidats_html[-1]
+    print(f'[6/7] Notes explicatives : {chemin.name}...')
+    t = chemin.read_bytes().decode('utf-8', errors='replace')
+    code_re = re.compile(r'\b\d{4}(?: \d{2}){0,2}\b')
+
+    def _texte(td: str) -> str:
+        x = re.sub(r'<[^>]+>', ' ', td)
+        return re.sub(r'\s+', ' ', html.unescape(x)).strip()
+
+    segments = []
+    for m in re.finditer(r'<tr>(.*?)</tr>', t, re.S):
+        row = m.group(1)
+        tds = re.findall(r'<td[^>]*>(.*?)</td>', row, re.S)
+        if len(tds) < 2:
+            continue
+        codes = _texte(tds[0])
+        corps = _texte(tds[1])
+        # En-tête = codes courts (plages « à », listes « et ») + texte ; on
+        # écarte les cellules de texte long qui ne sont pas des codes.
+        if not corps or len(codes) > 60 or not code_re.search(codes):
+            continue
+        segments.append({'codes': codes, 'texte': corps})
+    # Métadonnées de version depuis le titre du document.
+    m = re.search(r'<title>(.*?)</title>', t, re.S)
+    titre = _nettoie_texte(m.group(1)) if m else ''
+    doc = {
+        'source': 'Notes explicatives de la nomenclature combinée (NENC), texte consolidé '
+                  'FR — Office des publications de l\'UE (publications.europa.eu)',
+        'reference': titre,
+        'note': 'Les NENC sont des textes officiels d\'interprétation ; elles ne modifient '
+                'pas la nomenclature, elles documentent son application.',
+        'segments': segments,
+    }
+    # Libération avant sérialisation (machine cible : peu de RAM).
+    del t
+    gc.collect()
+    with open(OUT_NOTES, 'w', encoding='utf-8') as f:
+        json.dump(doc, f, ensure_ascii=False, indent=1)
+    print(f"      {len(segments)} segments -> {OUT_NOTES.name} ({OUT_NOTES.stat().st_size / 1e6:.1f} Mo)")
+
+
 def main() -> None:
     z, chemin = _lire_zip()
     version, reference = _version(chemin), _reference(chemin)
@@ -472,10 +537,15 @@ def main() -> None:
     _arbre(entrees)
     declarables = _lire_declarables(z)
     droits = _lire_droits(z)
-    _ecrire_fiscal(z, version, reference)
-    z.close()
+    # Écriture immédiate puis libération : la machine cible a peu de RAM et
+    # les étapes suivantes (fiscal, notes) n'ont pas besoin de la nomenclature.
     nomenclature = _ecrire_nomenclature(entrees, declarables, droits, version, reference)
     _ecrire_base(nomenclature, version, reference)
+    del entrees, declarables, droits, nomenclature
+    gc.collect()
+    _ecrire_fiscal(z, version, reference)
+    z.close()
+    _ecrire_notes()
     print('Terminé.')
 
 

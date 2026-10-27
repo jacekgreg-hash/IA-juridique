@@ -111,7 +111,7 @@ def propose_classement(produit: dict, caption: str = '', ocr_text: list | None =
         if recherche['candidats']:
             result['statut'] = 'candidats_a_departager'
             result['candidats'] = recherche['candidats']
-            result['recherche'] = 'designation'
+            result['recherche'] = recherche.get('source', 'designation')
             result['questions'] = [{'champ': 'nature',
                                    'question': 'Quelle est la nature précise de la marchandise ?',
                                    'impact': "confirme ou écarte les positions trouvées par recherche "

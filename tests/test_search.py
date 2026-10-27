@@ -49,11 +49,37 @@ def test_recherche_sac():
     assert r['candidats'][0]['code'].startswith('4202')
 
 
-def test_recherche_nature_absente_de_la_nomenclature_refuse():
-    # « bouilloire » n'existe pas dans la CN (le classement officiel de la
-    # bouilloire électrique est un débat douanier) : la matière seule (« inox »,
-    # « acier ») ne doit PAS produire du bruit (lingots d'acier 7218).
-    r = rechercher(['bouilloire', 'bouilloire en acier inoxydable', '', 'PHILIPS'])
+def test_recherche_bouilloire_via_notes_explicatives():
+    # « bouilloire » n'existe dans aucune désignation CN, mais les notes
+    # explicatives officielles disent que relèvent de 8516 10 11/80
+    # « les chaudières électriques qui produisent uniquement de l'eau chaude ».
+    # « électrique » (légende réaliste) départage des mentions de contexte
+    # (« tubes POUR les centrales électriques » 7304, chaudières à vapeur 8402).
+    r = rechercher(['bouilloire', 'bouilloire électrique en acier inoxydable', '', 'PHILIPS'])
+    assert r['statut'] == 'candidats'
+    assert r['source'] == 'notes_explicatives'
+    codes = [c['code'] for c in r['candidats']]
+    assert codes[0].startswith('8516 10')            # chauffe-eau : la bouilloire
+    assert not codes[0].startswith('7304')           # pas des tubes d'acier
+    raison = r['candidats'][0]['raisons'][0]
+    assert 'note explicative' in raison
+    assert "chaudières électriques" in raison       # citation du texte officiel
+
+
+def test_moteur_bouilloire_via_notes():
+    from server.tariff.engine import propose_classement
+    r = propose_classement({'objet': 'bouilloire', 'caracteristiques': ['inox']},
+                           'bouilloire électrique en acier inoxydable', [])
+    assert r['statut'] == 'candidats_a_departager'
+    assert r['recherche'] == 'notes_explicatives'
+    assert r['candidats'][0]['code'].startswith('8516 10')
+    assert r['questions'] and r['questions'][0]['champ'] == 'nature'
+
+
+def test_recherche_nature_illisible_refuse():
+    # Une nature absente de la nomenclature ET des notes explicatives ne
+    # produit rien — la matière seule ne classe pas.
+    r = rechercher(['flibustier', 'flibustier en acier inoxydable', '', 'PHILIPS'])
     assert r['statut'] == 'aucun_resultat'
     assert r['candidats'] == []
     assert 'nature non trouvée' in r['raison']
