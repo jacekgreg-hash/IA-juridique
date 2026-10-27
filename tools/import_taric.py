@@ -22,6 +22,9 @@ Sorties (régénérées, jamais éditées à la main) :
 * data/tariff/tariff_base.json — base du moteur tarifaire : les familles et
   discriminants restent définis ci-dessous (logique RITA), mais codes,
   désignations, taux et bases légales proviennent du TARIC officiel.
+* data/tariff/fiscal.sqlite — base du moteur fiscal (§16) : mesures par code
+  et par origine (droit de pays tiers 103, préférences 142, antidumping 552,
+  suspensions 117) + appartenance des pays aux groupes d'origine.
 
 Usage : python tools/import_taric.py [chemin/vers/eu-taric-YYYY-MM.zip]
 Sans argument, prend le eu-taric-*.zip le plus récent dans data/tariff/raw/.
@@ -30,6 +33,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import sys
 import zipfile
 import io
@@ -42,6 +46,12 @@ ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = ROOT / 'data' / 'tariff' / 'raw'
 OUT_NOMENCLATURE = ROOT / 'data' / 'tariff' / 'nomenclature_fr.json'
 OUT_BASE = ROOT / 'data' / 'tariff' / 'tariff_base.json'
+OUT_FISCAL = ROOT / 'data' / 'tariff' / 'fiscal.sqlite'
+
+# Types de mesures conservés pour le moteur fiscal (§16) — codes TARIC
+# officiels : 103 droit de pays tiers, 142 préférence tarifaire,
+# 552 droit antidumping définitif, 117 suspension.
+TYPES_FISCAL = {'103', '142', '552', '117'}
 
 # Droit de pays tiers : type de mesure 103, origine ERGA OMNES (toutes origines
 # sans préférence) — taux INDICATIF, le calcul fiscal (§16) dépend de l'origine.
@@ -292,7 +302,7 @@ def _droit_cascade(code10: str, parents: list[str], droits: dict[str, dict]) -> 
 # --- Écriture des sorties -------------------------------------------------------
 
 def _ecrire_nomenclature(entrees, declarables, droits, version, reference):
-    print(f"[5/5] Écriture de {OUT_NOMENCLATURE.name} et {OUT_BASE.name}...")
+    print(f"[6/6] Écriture de {OUT_NOMENCLATURE.name} et {OUT_BASE.name}...")
     codes = []
     for e in entrees:
         # Codes déclarables en douane (suffixe 80 + IS_LEAF=1) : CN8 et TARIC10.
@@ -369,6 +379,85 @@ def _ecrire_base(nomenclature: dict, version, reference):
     print(f"      {len(familles)} familles -> {OUT_BASE.name}")
 
 
+# --- Base fiscale (§16) ----------------------------------------------------------
+
+def _ecrire_fiscal(z: zipfile.ZipFile, version: str, reference: str) -> None:
+    """fiscal.sqlite : mesures fiscales par code + appartenance aux groupes d'origine.
+
+    Tables :
+    * mesures(code10, geo, geo_nom, type, type_nom, taux, brut, legal, add_code,
+      order_no, debut, fin) — lignes valides aujourd'hui, types 103/142/552/117.
+    * aires_geo(geo, pays_iso, nom) — membres des groupes d'origine (ex. Mercosur).
+    * groupes(geo, nom) — nom FR des groupes d'origine.
+    * meta(clé, valeur) — version TARIC et date de référence.
+    """
+    print('[5/6] Construction de la base fiscale...')
+    aujourd_hui = date.today()
+    OUT_FISCAL.unlink(missing_ok=True)
+    con = sqlite3.connect(OUT_FISCAL)
+    con.executescript("""
+        CREATE TABLE mesures (code10 TEXT, geo TEXT, geo_nom TEXT, type TEXT,
+            type_nom TEXT, taux REAL, brut TEXT, legal TEXT, add_code TEXT,
+            order_no TEXT, debut TEXT, fin TEXT);
+        CREATE INDEX idx_mesures_code ON mesures(code10);
+        CREATE TABLE aires_geo (geo TEXT, pays_iso TEXT, nom TEXT);
+        CREATE INDEX idx_aires_pays ON aires_geo(pays_iso);
+        CREATE TABLE groupes (geo TEXT, nom TEXT);
+        CREATE TABLE meta (cle TEXT, valeur TEXT);
+    """)
+    # Mesures fiscales valides aujourd'hui (Duties Import) — la cascade
+    # code -> parents est appliquée au calcul par le moteur fiscal.
+    nb = 0
+    wb = load_workbook(io.BytesIO(z.read('Duties Import 01-99.xlsx')), read_only=True)
+    ws = wb[wb.sheetnames[0]]
+    for code, add, order, debut, fin, _red, origine, mtype, legal, duty, ocode, mcode in ws.iter_rows(values_only=True):
+        code = str(code or '')
+        if not re.fullmatch(r'\d{10}', code) or str(mcode) not in TYPES_FISCAL:
+            continue
+        d_debut = _parse_date(debut)
+        if not d_debut or d_debut > aujourd_hui or not _aujourdhui(_parse_date(fin)):
+            continue
+        taux, brut = _parse_taux(duty)
+        con.execute('INSERT INTO mesures VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (code, str(ocode or ''), str(origine or ''), str(mcode), str(mtype or ''),
+                     taux, brut, str(legal or '').strip(), str(add or ''), str(order or ''),
+                     str(debut or ''), str(fin or '')))
+        nb += 1
+    wb.close()
+    # Appartenance aux groupes d'origine (membres actuels).
+    wb = load_workbook(io.BytesIO(z.read('Geographical areas composition.xlsx')), read_only=True)
+    ws = wb[wb.sheetnames[0]]
+    for geo, _debut, _lang, _abbr, _descr, pays, _abbr2, nom, m_debut, m_fin, fin in ws.iter_rows(values_only=True):
+        geo, pays = str(geo or ''), str(pays or '')
+        if not geo or not pays:
+            continue
+        if not _aujourdhui(_parse_date(fin)) or not _aujourdhui(_parse_date(m_fin)):
+            continue
+        if _parse_date(m_debut) and _parse_date(m_debut) > aujourd_hui:
+            continue
+        con.execute('INSERT INTO aires_geo VALUES (?,?,?)', (geo, pays, str(nom or '')))
+    wb.close()
+    # Noms FR des groupes d'origine.
+    wb = load_workbook(io.BytesIO(z.read('Geographical areas description.xlsx')), read_only=True)
+    ws = wb[wb.sheetnames[0]]
+    vus = set()
+    for geo, lang, _abbr, nom, _debut, _ddebut, fin in ws.iter_rows(values_only=True):
+        geo = str(geo or '')
+        if not geo or str(lang or '').upper() != 'FR' or geo in vus:
+            continue
+        if not _aujourdhui(_parse_date(fin)):
+            continue
+        con.execute('INSERT INTO groupes VALUES (?,?)', (geo, _nettoie_texte(nom)))
+        vus.add(geo)
+    wb.close()
+    con.executemany('INSERT INTO meta VALUES (?,?)',
+                    [('version', f'TARIC {version}'), ('date_reference', reference),
+                     ('source', 'Commission européenne, extraction CIRCABC « TARIC & Quota Data »')])
+    con.commit()
+    con.close()
+    print(f'      {nb} mesures fiscales -> {OUT_FISCAL.name} ({OUT_FISCAL.stat().st_size / 1e6:.1f} Mo)')
+
+
 def main() -> None:
     z, chemin = _lire_zip()
     version, reference = _version(chemin), _reference(chemin)
@@ -376,6 +465,7 @@ def main() -> None:
     _arbre(entrees)
     declarables = _lire_declarables(z)
     droits = _lire_droits(z)
+    _ecrire_fiscal(z, version, reference)
     z.close()
     nomenclature = _ecrire_nomenclature(entrees, declarables, droits, version, reference)
     _ecrire_base(nomenclature, version, reference)

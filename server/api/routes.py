@@ -10,11 +10,12 @@ from server.fusion.engine import fuse
 from server.ocr.select import ocr_detailed
 from server.persistence import store
 from server.tariff.engine import propose_classement
+from server.tariff.fiscal import taux_estime
 from server.vision.enrich import enrich_vision
 from server.vision.select import MODEL, analyze
 
 router=APIRouter()
-APP_VERSION='3.0.0'
+APP_VERSION='3.2.0'
 VERSION=(f'RITA Vision V{APP_VERSION} — moteurs interchangeables '
          f'(vision: {os.getenv("VISION_ENGINE","florence")}, ocr: {os.getenv("OCR_ENGINE","paddle")}, '
          f'llm: {os.getenv("TEXT_LLM_PROVIDER","ollama")}) + SearXNG + fusion de preuves')
@@ -134,3 +135,19 @@ def analysis_detail(aid: str):
     if payload is None:
         raise HTTPException(status_code=404,detail='Analyse inconnue')
     return payload
+
+# --- V3.1 : moteur fiscal (§16) — estimation des droits par origine ---
+
+@router.get('/api/v1/duty')
+def duty(code: str, origine: str):
+    """Droits d'importation UE estimés pour un code marchandise et une origine.
+
+    Exemple : GET /api/v1/duty?code=6403190000&origine=CN
+    Le résultat est une estimation documentée (jamais une décision fiscale) :
+    préférence éventuelle de l'accord couvrant l'origine, droit antidumping
+    éventuel, base légale et avertissement de vérification officielle.
+    """
+    try:
+        return taux_estime(code,origine)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503,detail=str(exc)) from exc

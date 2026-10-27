@@ -18,3 +18,5 @@ data/rita.sqlite
 
 # Extractions TARIC brutes (79 Mo, régénérables via tools/import_taric.py)
 data/tariff/raw/
+# La base fiscale est une donnée générée mais versionnée (comme nomenclature_fr.json)
+!data/tariff/fiscal.sqlite
