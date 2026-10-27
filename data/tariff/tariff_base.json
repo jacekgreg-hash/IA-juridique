@@ -1,110 +1,159 @@
 {
-  "version": "2026.10-prototype",
-  "source": "base d'essai prototype (codes HS/TARIC simplifiés, à remplacer par le TARIC officiel)",
-  "date_validite": "2026-10-26",
+  "version": "TARIC 2026-10",
+  "source": "Base TARIC officielle (Commission européenne, extraction CIRCABC « TARIC & Quota Data and Information ») — désignations FR et droits de pays tiers (mesure 103, ERGA OMNES)",
+  "date_validite": "2026-10-01",
   "familles": {
     "chaussures": {
-      "natures": ["chaussure de sport", "chaussure", "botte"],
+      "natures": [
+        "chaussure de sport",
+        "chaussure",
+        "botte"
+      ],
       "discriminant": "tige",
       "question_tige": "Quelle est la matière de la tige (la partie supérieure) de la chaussure ?",
       "codes": [
         {
-          "code": "6403 40 00",
-          "designation": "Chaussures de sport à semelles en caoutchouc ou plastiques, tige en cuir naturel",
+          "code": "6403 19 00",
+          "code10": "6403190000",
+          "designation": "Chaussures à semelles extérieures en caoutchouc, matière plastique, cuir naturel ou reconstitué et dessus en cuir naturel, Chaussures de sport, autres",
           "tige": "cuir",
-          "taux_indicatif_droits": "0.00",
-          "notes": "tige cuir => 6403 ; le taux indicatif dépend de l'origine (préférences UE)"
+          "taux_indicatif_droits": "0.080",
+          "base_legale": "Regulation 2658/87",
+          "notes": "tige cuir => 6403 (chaussures de sport, autres que ski)"
         },
         {
           "code": "6404 11 00",
-          "designation": "Chaussures de sport à semelles en caoutchouc ou plastiques, tige en textile",
+          "code10": "6404110000",
+          "designation": "Chaussures à semelles extérieures en caoutchouc, matière plastique, cuir naturel ou reconstitué et dessus en matières textiles, Chaussures à semelles extérieures en caoutchouc ou en matière plastique, Chaussures de sport; chaussures dites de tennis, de basket-ball, de gymnastique, d'entraînement et chaussures similaires",
           "tige": "textile",
-          "taux_indicatif_droits": "0.17",
-          "notes": "tige textile => 6404 ; l'une des familles les plus taxées du chapitre 64"
+          "taux_indicatif_droits": "0.169",
+          "base_legale": "Regulation 0838/06",
+          "notes": "dessus textile => 6404 ; l'une des familles les plus taxées du chapitre 64"
         },
         {
           "code": "6402 19 00",
-          "designation": "Chaussures de sport à semelles et tige en caoutchouc ou plastique",
+          "code10": "6402190000",
+          "designation": "Autres chaussures à semelles extérieures et dessus en caoutchouc ou en matière plastique, Chaussures de sport, autres",
           "tige": "plastique/caoutchouc",
-          "taux_indicatif_droits": "0.00",
-          "notes": "tige plastique/caoutchouc => 6402"
+          "taux_indicatif_droits": "0.169",
+          "base_legale": "Regulation 0838/06",
+          "notes": "semelle et dessus en caoutchouc/plastique => 6402"
         }
       ]
     },
     "telephonie": {
-      "natures": ["téléphone"],
+      "natures": [
+        "téléphone"
+      ],
       "discriminant": "type_appareil",
       "question_type_appareil": "S'agit-il d'un smartphone (écran tactile) ou d'un téléphone classique à clavier ?",
       "codes": [
         {
           "code": "8517 13 00",
-          "designation": "Téléphones intelligents (smartphones) pour réseaux cellulaires",
+          "code10": "8517130000",
+          "designation": "Postes téléphoniques d’usagers, y compris les téléphones intelligents et autres téléphones pour réseaux cellulaires et pour autres réseaux sans fil; autres appareils pour l'émission, la transmission ou la réception de la voix, d’images ou d'autres données, y compris les appareils pour la communication dans un réseau filaire ou sans fil (tel qu'un réseau local ou étendu), autres que ceux des nos 8443 , 8525 , 8527 ou 8528, Postes téléphoniques d’usagers, y compris les téléphones intelligents et autres téléphones pour réseaux cellulaires et pour autres réseaux sans fil, Téléphones intelligents",
           "type_appareil": "smartphone",
-          "taux_indicatif_droits": "0.00",
+          "taux_indicatif_droits": "0.000",
+          "base_legale": "Regulation 1832/21",
           "notes": "smartphone = écran tactile, système d'exploitation complet"
         },
         {
           "code": "8517 14 00",
-          "designation": "Autres téléphones pour réseaux cellulaires (téléphones à clavier)",
+          "code10": "8517140000",
+          "designation": "Postes téléphoniques d’usagers, y compris les téléphones intelligents et autres téléphones pour réseaux cellulaires et pour autres réseaux sans fil; autres appareils pour l'émission, la transmission ou la réception de la voix, d’images ou d'autres données, y compris les appareils pour la communication dans un réseau filaire ou sans fil (tel qu'un réseau local ou étendu), autres que ceux des nos 8443 , 8525 , 8527 ou 8528, Postes téléphoniques d’usagers, y compris les téléphones intelligents et autres téléphones pour réseaux cellulaires et pour autres réseaux sans fil, Autres téléphones pour réseaux cellulaires ou autres réseaux sans fil",
           "type_appareil": "classique",
-          "taux_indicatif_droits": "0.00",
+          "taux_indicatif_droits": "0.000",
+          "base_legale": "Regulation 1832/21",
           "notes": "téléphone classique/feature phone avec clavier physique"
         }
       ]
     },
     "horlogerie": {
-      "natures": ["montre"],
+      "natures": [
+        "montre"
+      ],
       "discriminant": "mouvement",
       "question_mouvement": "Quel est le mouvement de la montre : automatique/mécanique, à quartz analogique, ou à affichage numérique ?",
       "codes": [
         {
           "code": "9101 21 00",
-          "designation": "Montres-bracelets à remontage automatique (mécaniques, non électriques)",
+          "code10": "9101210000",
+          "designation": "Montres-bracelets, montres de poche et montres similaires (y compris les compteurs de temps des mêmes types), avec boîte en métaux précieux ou en plaqués ou doublés de métaux précieux, autres montres-bracelets, même incorporant un compteur de temps, à remontage automatique",
           "mouvement": "automatique",
           "taux_indicatif_droits": "0.045",
-          "notes": "« Automatic » sur le cadran => remontage automatique => 9101"
-        },
-        {
-          "code": "9102 19 00",
-          "designation": "Autres montres-bracelets électriques (quartz analogique)",
-          "mouvement": "quartz",
-          "taux_indicatif_droits": "0.045",
-          "notes": "montre électrique autre qu'à affichage numérique"
+          "base_legale": "Regulation 2261/98",
+          "notes": "« Automatic » sur le cadran => remontage automatique ; boîte en métaux précieux ou plaqués => 9101"
         },
         {
           "code": "9102 21 00",
-          "designation": "Montres-bracelets électriques à affichage numérique",
+          "code10": "9102210000",
+          "designation": "Montres-bracelets, montres de poche et montres similaires (y compris les compteurs de temps des mêmes types), autres que celles du n° 9101, autres montres-bracelets, même incorporant un compteur de temps, à remontage automatique",
+          "mouvement": "automatique",
+          "taux_indicatif_droits": "0.045",
+          "base_legale": "Regulation 2261/98",
+          "notes": "remontage automatique, boîte autre que métaux précieux => 9102"
+        },
+        {
+          "code": "9102 11 00",
+          "code10": "9102110000",
+          "designation": "Montres-bracelets, montres de poche et montres similaires (y compris les compteurs de temps des mêmes types), autres que celles du n° 9101, Montres-bracelets, fonctionnant électriquement, même incorporant un compteur de temps, à affichage mécanique seulement",
+          "mouvement": "quartz",
+          "taux_indicatif_droits": "0.045",
+          "base_legale": "Regulation 2261/98",
+          "notes": "montre fonctionnant électriquement à affichage mécanique seulement (quartz analogique)"
+        },
+        {
+          "code": "9102 19 00",
+          "code10": "9102190000",
+          "designation": "Montres-bracelets, montres de poche et montres similaires (y compris les compteurs de temps des mêmes types), autres que celles du n° 9101, Montres-bracelets, fonctionnant électriquement, même incorporant un compteur de temps, autres",
           "mouvement": "numerique",
           "taux_indicatif_droits": "0.045",
-          "notes": "cadran à cristaux liquides (LCD)"
+          "base_legale": "Regulation 2261/98",
+          "notes": "montre électrique « autres » : comprend l'affichage numérique (LCD) et les autres affichages"
         }
       ]
     },
     "meubles": {
-      "natures": ["commode", "armoire", "étagère", "canapé", "fauteuil", "chaise", "table", "lit", "meuble"],
+      "natures": [
+        "commode",
+        "armoire",
+        "étagère",
+        "canapé",
+        "fauteuil",
+        "chaise",
+        "table",
+        "lit",
+        "meuble"
+      ],
       "discriminant": "matiere_principale",
       "question_matiere_principale": "Quelle est la matière principale du meuble : bois, plastique ou métal ?",
       "codes": [
         {
-          "code": "9403 60 00",
-          "designation": "Autres meubles et leurs parties, en bois (chambre à coucher, salle à manger...)",
+          "code": "9403 60 90",
+          "code10": "9403609000",
+          "designation": "Autres meubles et leurs parties, autres meubles en bois, autres meubles en bois",
           "matiere_principale": "bois",
-          "taux_indicatif_droits": "0.00",
-          "notes": "commode/armoire en bois => position 9403.60"
+          "taux_indicatif_droits": "0.000",
+          "base_legale": "Regulation 2261/98",
+          "notes": "meuble en bois => 9403.6 ; chambres à coucher => 9403 50, salles à manger => 9403 60 10, magasins => 9403 60 30"
         },
         {
           "code": "9403 70 00",
-          "designation": "Meubles en plastiques",
+          "code10": "9403700000",
+          "designation": "Autres meubles et leurs parties, Meubles en matières plastiques",
           "matiere_principale": "plastique",
-          "taux_indicatif_droits": "0.00",
+          "taux_indicatif_droits": "0.000",
+          "base_legale": "Regulation 2261/98",
           "notes": "meuble dont la structure est en plastique"
         },
         {
-          "code": "9403 20 00",
-          "designation": "Autres meubles en métal",
+          "code": "9403 20 80 80",
+          "code10": "9403208080",
+          "designation": "Autres meubles et leurs parties, autres meubles en métal, autres, autres",
           "matiere_principale": "métal",
-          "taux_indicatif_droits": "0.00",
-          "notes": "meuble à structure métallique (classement distinct du mobilier de bureau métallique 9403.10)"
+          "taux_indicatif_droits": "0.000",
+          "base_legale": "Regulation 2261/98",
+          "notes": "meuble à structure métallique => 9403.2 (bureau => 9403.10, lits => 9403 20 20)"
         }
       ]
     }

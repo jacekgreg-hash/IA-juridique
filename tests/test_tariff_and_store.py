@@ -10,13 +10,27 @@ def test_tariff_commode_bois():
     r = propose_classement({'objet': 'commode', 'caracteristiques': ['gris', 'bois', 'tiroirs']},
                           'petit meuble ancien en bois foncé', [])
     assert r['statut'] == 'candidat_dominant'
-    assert r['candidats'][0]['code'] == '9403 60 00'
+    # 9403 60 00 a été subdivisé dans la CN : « autres meubles en bois » = 9403 60 90.
+    assert r['candidats'][0]['code'] == '9403 60 90'
     assert r['candidats'][0]['statut'] == 'propose'      # jamais « confirmé » (§29)
 
 
 def test_tariff_montre_automatique():
-    r = propose_classement({'objet': 'montre'}, "montre Automatic Diver's 200m", ['AUTOMATIC'])
-    assert r['candidats'][0]['code'] == '9101 21 00'
+    # « Automatic » => remontage automatique, mais le TARIC distingue ensuite
+    # par la matière de la boîte (9101 précieuse / 9102 autre) : ex æquo, le
+    # moteur demande le critère au lieu de trancher (§9, §29).
+    r = propose_classement({'objet': 'montre'}, "montre Automatic Diver's 200m", [])
+    assert r['statut'] == 'candidats_a_departager'
+    codes = [c['code'] for c in r['candidats'] if c['confiance'] == r['candidats'][0]['confiance']]
+    assert codes == ['9101 21 00', '9102 21 00']
+    assert r['questions'] and r['questions'][0]['champ'] == 'criteres_complementaires'
+
+
+def test_tariff_montre_quartz():
+    # Quartz analogique = électrique « à affichage mécanique seulement » => 9102 11 00.
+    r = propose_classement({'objet': 'montre'}, 'montre Seiko à quartz', [])
+    assert r['statut'] == 'candidat_dominant'
+    assert r['candidats'][0]['code'] == '9102 11 00'
 
 
 def test_tariff_telephone_clavier_est_pas_smartphone():

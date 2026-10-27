@@ -133,9 +133,19 @@ def propose_classement(produit: dict, caption: str = '', ocr_text: list | None =
                                'impact': 'permet de choisir entre les positions ' + ', '.join(c['code'] for c in cands)}]
         result['informations_manquantes'] = [discriminant]
         result['statut'] = 'candidats_a_departager'
-    elif len(cands) >= 2 and cands[0]['confiance'] - cands[1]['confiance'] >= 0.45:
-        result['statut'] = 'candidat_dominant'
-        result['informations_manquantes'] = []
+    elif len(cands) >= 2 and cands[0]['confiance'] == cands[1]['confiance']:
+        # Égalité parfaite : le discriminant identifié ne suffit pas à départager
+        # les positions (ex. remontage automatique avec boîte précieuse => 9101
+        # vs non précieuse => 9102). On demande le critère supplémentaire plutôt
+        # que de trancher (§9 : candidats multiples, §29 : décision à l'utilisateur).
+        codes = ', '.join(c['code'] for c in cands if c['confiance'] == cands[0]['confiance'])
+        result['questions'] = [{'champ': 'criteres_complementaires',
+                               'question': f"Plusieurs positions correspondent aux faits identifiés ({codes}) ; "
+                                           "quel critère supplémentaire permet de les départager (examinez leurs désignations officielles) ?",
+                               'impact': 'choix entre les positions ' + codes}]
+        result['informations_manquantes'] = ['critère de départage entre les positions ' + codes]
+        result['statut'] = 'candidats_a_departager'
     else:
         result['statut'] = 'candidat_dominant'
+        result['informations_manquantes'] = []
     return result
