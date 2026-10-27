@@ -45,6 +45,32 @@ def test_tariff_chaussure_mesh_textile():
     assert r['candidats'][0]['code'] == '6404 11 00'
 
 
+# --- calibrage mesuré au banc d'essai (§26, légendes Mistral réelles) ---
+
+def test_tariff_tige_textile_au_pluriel():
+    # « matières synthétiques et textiles » ne matchait pas \btextile\b — la
+    # formulation la plus naturelle en français était ratée (légende mesurée).
+    r = propose_classement({'objet': 'chaussure'},
+                           'chaussure de sport en matières synthétiques et textiles', [])
+    assert r['candidats'][0]['code'] == '6404 11 00'
+
+
+def test_tariff_semelle_ne_definit_pas_la_tige():
+    # « semelle extérieure en caoutchouc » faisait classer la TIGE en
+    # caoutchouc (6402) — la tige textile doit rester textile.
+    r = propose_classement({'objet': 'chaussure'},
+                           "chaussure en matières textiles, dotée d'une semelle extérieure en caoutchouc", [])
+    assert r['candidats'][0]['code'] == '6404 11 00'
+
+
+def test_tariff_renforts_cuirs_ne_definissent_pas_la_tige():
+    # « possiblement des renforts en cuir » faisait classer une tige mesh
+    # en cuir (6403) — les renforts ne définissent pas la pièce qui départage.
+    r = propose_classement({'objet': 'chaussure'},
+                           'chaussure en mesh textile, du synthétique et possiblement des renforts en cuir', [])
+    assert r['candidats'][0]['code'] == '6404 11 00'
+
+
 def test_tariff_question_ciblee_quand_info_manque():
     # §11/§31.3 : sans matière de tige, plusieurs candidats + la question qui départage.
     r = propose_classement({'objet': 'chaussure de sport', 'caracteristiques': ['blanc']}, 'une chaussure', [])

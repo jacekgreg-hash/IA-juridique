@@ -31,23 +31,23 @@ _BASE_PATH = Path(__file__).resolve().parents[2] / 'data' / 'tariff' / 'tariff_b
 # (caractéristiques enrichies, légende, OCR) -> valeur de la base tarifaire.
 _DISCRIMINATORS = {
     'tige': (
-        ('cuir', (r'\bcuir\b', r'\bleather\b')),
-        ('textile', (r'\bmesh\b', r'\btoile\b', r'\btissu\b', r'\btextile\b', r'\bcanvas\b', r'\bmaill\w*\b')),
-        ('plastique/caoutchouc', (r'\bplastique\b', r'\bplastic\b', r'\bcaoutchouc\b', r'\brubber\b')),
+        ('cuir', (r'\bcuirs?\b', r'\bleathers?\b')),
+        ('textile', (r'\bmesh(es)?\b', r'\btoiles?\b', r'\btissus?\b', r'\btextiles?\b', r'\bcanvas\b', r'\bmaill\w*\b')),
+        ('plastique/caoutchouc', (r'\bplastiques?\b', r'\bplastic\b', r'\bcaoutchouc\b', r'\brubbers?\b')),
     ),
     'type_appareil': (
-        ('smartphone', (r'\btactile\b', r'\btouchscreen\b', r'\btouch screen\b', r'\bsmartphone\b')),
-        ('classique', (r'\bclavier\b', r'\bkeyboard\b', r'\bTouches\b', r'\bfeature phone\b')),
+        ('smartphone', (r'\btactile\b', r'\btouchscreens?\b', r'\btouch screen\b', r'\bsmartphones?\b')),
+        ('classique', (r'\bclaviers?\b', r'\bkeyboards?\b', r'\bTouches\b', r'\bfeature phones?\b')),
     ),
     'mouvement': (
-        ('automatique', (r'\bautomatic\b', r'\bautomatique\b', r'\bremontage automatique\b', r'\bmécanique\b')),
-        ('numerique', (r'\bnumérique\b', r'\bnumerique\b', r'\bdigital\b', r'\bLCD\b')),
-        ('quartz', (r'\bquartz\b', r'\bpile\b', r'\bélectrique\b')),
+        ('automatique', (r'\bautomatic\b', r'\bautomatiques?\b', r'\bremontage automatique\b', r'\bmécaniques?\b')),
+        ('numerique', (r'\bnumériques?\b', r'\bnumeriques?\b', r'\bdigital\b', r'\bLCD\b')),
+        ('quartz', (r'\bquartz\b', r'\bpile\b', r'\bélectriques?\b')),
     ),
     'matiere_principale': (
-        ('bois', (r'\bbois\b', r'\bwood\b', r'\bchêne\b', r'\bhêtre\b', r'\bpin\b', r'\bmahogany\b', r'\bverni\b')),
-        ('plastique', (r'\bplastique\b', r'\bplastic\b', r'\bPVC\b')),
-        ('métal', (r'\bmétal\b', r'\bmetal\b', r'\bmétallique\b', r'\bacier\b', r'\bacier\b', r'\baluminium\b')),
+        ('bois', (r'\bbois\b', r'\bwood\b', r'\bchênes?\b', r'\bhêtres?\b', r'\bpins?\b', r'\bmahogany\b', r'\bverni\b')),
+        ('plastique', (r'\bplastiques?\b', r'\bplastic\b', r'\bPVC\b')),
+        ('métal', (r'\bmétals?\b', r'\bmétaux\b', r'\bmetal\b', r'\bmétalliques?\b', r'\baciers?\b', r'\baluminium\b')),
     ),
 }
 
@@ -68,12 +68,30 @@ def _family_for(nature: str) -> tuple[str, dict] | tuple[None, None]:
     return None, None
 
 
+# Éléments SECONDAIRES nommés juste avant une matière : celle-ci ne définit pas
+# la pièce qui départage (mesuré au banc §26 : « semelle extérieure en
+# caoutchouc » faisait classer la TIGE en caoutchouc ; « renforts en cuir » en
+# cuir — renforts d'une tige mesh). Fenêtre courte (45 caractères) : « tige en
+# cuir avec lacets » reste valable, « marque Nike ... matières textiles » aussi.
+_ELEMENTS_SECONDAIRES = re.compile(
+    r'\b(renforts?|accents?|empiècements?|détails?|doublure|languette|bandes?|'
+    r'semelles?|sole|insoles?|coutures?|œillets?)\b[^|]{0,45}$',
+    re.IGNORECASE)
+
+
 def _detect_discriminator(family_key: str, texts: list[str]) -> str | None:
-    """Valeur du critère de départage, déterministe, à partir des preuves texte."""
+    """Valeur du critère de départage, déterministe, à partir des preuves texte.
+
+    Chaque occurrence est validée contre son contexte : une matière attachée à
+    un élément secondaire (semelle, renforts...) ne départage pas la position.
+    """
     haystack = ' | '.join(str(t or '') for t in texts if t)
     for value, patterns in _DISCRIMINATORS.get(family_key, ()):
         for p in patterns:
-            if re.search(p, haystack, flags=re.IGNORECASE):
+            for match in re.finditer(p, haystack, flags=re.IGNORECASE):
+                avant = haystack[max(0, match.start() - 45):match.start()]
+                if _ELEMENTS_SECONDAIRES.search(avant):
+                    continue  # matière d'un élément secondaire : sans valeur de départage
                 return value
     return None
 

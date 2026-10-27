@@ -20,3 +20,4 @@ data/rita.sqlite
 data/tariff/raw/
 # La base fiscale est une donnée générée mais versionnée (comme nomenclature_fr.json)
 !data/tariff/fiscal.sqlite
+data/banc_essai/rapport_*.json

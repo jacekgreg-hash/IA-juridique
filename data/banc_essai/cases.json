@@ -1,0 +1,17 @@
+{
+  "note": "Banc d'essai (§26) : ajouter une photo dans images/ + une entrée dans cases. codes_acceptables admet les classements légitimes (tige textile OU cuir). Le banc sans recherche web ne peut pas confirmer un modèle.",
+  "cases": [
+    {
+      "id": "nike-air-max-tavas",
+      "image": "data/banc_essai/images/NIKE-P-6000.jpg",
+      "repetitions": 2,
+      "attendus": {
+        "nature": "chaussure",
+        "marque": "Nike",
+        "codes_acceptables": ["6404 11 00", "6403 19 00"],
+        "origine": "VN",
+        "note": "fixture locale : la photo montre une Nike Air Max Tavas (renommée depuis NIKE-P-6000.jpg — l'étiquette du catalogue était erronée, la vision a lu le vrai nom). Dessus mesh/synthétique."
+      }
+    }
+  ]
+}

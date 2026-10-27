@@ -36,6 +36,9 @@ API_URL = os.getenv('MISTRAL_VISION_URL', 'https://api.mistral.ai/v1/chat/comple
 API_KEY = os.getenv('MISTRAL_API_KEY', '').strip()
 TIMEOUT = float(os.getenv('MISTRAL_VISION_TIMEOUT', '60'))
 MAX_SIDE = int(os.getenv('MISTRAL_VISION_MAX_SIDE', '1024'))
+# Reproductibilité du banc d'essai (§26) : température 0 + graine fixe. L'API
+# peut rester non déterministe côté serveur ; le banc mesure cette variance.
+SEED = os.getenv('MISTRAL_VISION_SEED', '')
 
 # La légende produite alimente le même enrichissement déterministe que Florence
 # (server/vision/enrich.py). Aucun modèle ni référence n'est demandé ici :
@@ -67,21 +70,24 @@ def analyze(path: Path) -> dict[str, Any]:
         raise RuntimeError('MISTRAL_API_KEY absente : nécessaire pour VISION_ENGINE=mistral')
     image = prepare_image(path)
     started = time.time()
+    payload = {
+        'model': MODEL_ID,
+        'temperature': 0,
+        'max_tokens': 220,
+        'messages': [{
+            'role': 'user',
+            'content': [
+                {'type': 'text', 'text': PROMPT},
+                {'type': 'image_url', 'image_url': _data_url(path)},
+            ],
+        }],
+    }
+    if SEED:
+        payload['random_seed'] = int(SEED)
     response = requests.post(
         API_URL,
         headers={'Authorization': f'Bearer {API_KEY}', 'Accept': 'application/json'},
-        json={
-            'model': MODEL_ID,
-            'temperature': 0,
-            'max_tokens': 220,
-            'messages': [{
-                'role': 'user',
-                'content': [
-                    {'type': 'text', 'text': PROMPT},
-                    {'type': 'image_url', 'image_url': _data_url(path)},
-                ],
-            }],
-        },
+        json=payload,
         timeout=TIMEOUT,
     )
     response.raise_for_status()
