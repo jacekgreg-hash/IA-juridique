@@ -1,8 +1,7 @@
 from __future__ import annotations
-import hashlib, io, ipaddress, logging, os, socket, threading, time
+import hashlib, http.client, io, ipaddress, logging, os, socket, ssl, threading, time
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
-import requests
 from PIL import Image, ImageOps
 from server.candidates.web_search import ImageResult
 from server.candidates.engine import visual_feature_scores
@@ -22,18 +21,38 @@ _download_count=0
 
 def _key(url): return CACHE_DIR/(hashlib.sha256(url.encode('utf-8')).hexdigest()+'.jpg')
 
+def _resolve_public(hostname: str, port: int) -> str | None:
+    """Résout le nom d'hôte UNE fois et retourne un IP public vérifié.
+
+    Tous les IP résolus doivent être publics : si un seul est privé/réservé
+    (réseau local, lien-local, loopback), la résolution est refusée.
+    """
+    try:
+        infos = socket.getaddrinfo(hostname, port, proto=socket.IPPROTO_TCP)
+    except Exception:
+        return None
+    ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for info in infos:
+        try:
+            ips.append(ipaddress.ip_address(info[4][0]))
+        except ValueError:
+            return None
+    if not ips or any(not ip.is_global for ip in ips):
+        return None
+    return str(ips[0])
+
+
 def is_public_url(url):
     """Garde anti-SSRF : http(s) uniquement, et tous les IP résolus doivent être publics.
 
-    Limite connue : un rebinding DNS entre cette vérification et la requête reste possible ;
-    à durcir (résolveur/egress dédié) avant toute exposition hors poste local."""
+    V3.6 : la vérification n'est plus qu'un indicateur — le téléchargement
+    (_fetch) épingle l'IP résolu : la connexion se fait SUR l'IP vérifié, une
+    nouvelle résolution DNS (rebinding) est impossible."""
     try:
-        parsed=urlparse(url)
-        if parsed.scheme not in ('http','https') or not parsed.hostname: return False
-        for info in socket.getaddrinfo(parsed.hostname,parsed.port or (443 if parsed.scheme=='https' else 80),proto=socket.IPPROTO_TCP):
-            ip=ipaddress.ip_address(info[4][0])
-            if not ip.is_global: return False
-        return True
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+            return False
+        return _resolve_public(parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80)) is not None
     except Exception:
         return False
 
@@ -64,16 +83,70 @@ def _maybe_purge():
     if n==1 or n % PURGE_EVERY==0:
         purge_cache()
 
+class _PinnedHTTPS(http.client.HTTPSConnection):
+    """HTTPS vers un IP ÉPINGLÉ, avec SNI et vérification de certificat sur le
+    vrai nom d'hôte (pas l'IP) : le rebinding DNS est impossible — on se
+    connecte à l'IP vérifié, jamais à une nouvelle résolution."""
+
+    def __init__(self, ip, port, timeout, context, sni_hostname):
+        super().__init__(ip, port, timeout=timeout, context=context)
+        self._sni_hostname = sni_hostname
+
+    def connect(self):
+        sock = socket.create_connection((self.host, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self._sni_hostname)
+
+
 def _fetch(url):
-    """GET en suivant les redirections à la main, chacune revalidée par is_public_url."""
-    for _ in range(MAX_REDIRECTS+1):
-        if not is_public_url(url): return None
-        r=requests.get(url,timeout=TIMEOUT,headers={'User-Agent':'RITA-Vision/2.14'},stream=True,allow_redirects=False)
-        if r.is_redirect or r.status_code in (301,302,303,307,308):
-            loc=r.headers.get('location'); r.close()
-            if not loc: return None
-            url=urljoin(url,loc); continue
-        r.raise_for_status(); return r
+    """GET en suivant les redirections à la main, chaque saut résolu UNE fois
+    vers un IP public vérifié puis ÉPINGLÉ (V3.6 : ferme la fenêtre de
+    rebinding DNS qui existait entre la vérification et la requête).
+
+    Retourne (connexion, réponse http.client, en-têtes minuscules) ou None.
+    """
+    for _ in range(MAX_REDIRECTS + 1):
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+            return None
+        port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+        ip = _resolve_public(parsed.hostname, port)
+        if not ip:
+            return None
+        cible = parsed.path or '/'
+        if parsed.query:
+            cible += '?' + parsed.query
+        conn = resp = None
+        try:
+            if parsed.scheme == 'https':
+                conn = _PinnedHTTPS(ip, port, TIMEOUT, ssl.create_default_context(), parsed.hostname)
+            else:
+                conn = http.client.HTTPConnection(ip, port, timeout=TIMEOUT)
+            # Host : le nom d'hôte d'origine (le routage virtuel des serveurs
+            # mutualisés en dépend), la connexion reste épinglée sur l'IP.
+            conn.request('GET', cible, headers={'User-Agent': 'RITA-Vision/3.6',
+                                               'Host': parsed.hostname})
+            resp = conn.getresponse()
+            status = resp.status
+            headers = {k.lower(): v for k, v in resp.getheaders()}
+            if status in (301, 302, 303, 307, 308):
+                loc = headers.get('location')
+                resp.close(); conn.close()
+                if not loc:
+                    return None
+                url = urljoin(url, loc)
+                continue
+            if status >= 400:
+                resp.close(); conn.close()
+                return None
+            return conn, resp, headers
+        except Exception:
+            if resp is not None:
+                try: resp.close()
+                except Exception: pass
+            if conn is not None:
+                try: conn.close()
+                except Exception: pass
+            return None
     return None
 
 def download_image(url):
@@ -82,17 +155,23 @@ def download_image(url):
     path=_key(url)
     if path.exists() and path.stat().st_size>0: return path
     try:
-        r=_fetch(url)
-        if r is None: return None
-        ctype=(r.headers.get('content-type') or '').lower()
-        if ctype and not ctype.startswith('image/'): return None
-        data=bytearray()
-        for chunk in r.iter_content(65536):
-            data.extend(chunk)
-            if len(data)>MAX_BYTES: return None
-        im=Image.open(io.BytesIO(data)).convert('RGB')
-        if min(im.size)<80: return None
-        im.thumbnail((1000,1000),Image.Resampling.LANCZOS); im.save(path,'JPEG',quality=85,optimize=True); return path
+        fetch=_fetch(url)
+        if fetch is None: return None
+        conn,resp,headers=fetch
+        try:
+            ctype=(headers.get('content-type') or '').lower()
+            if ctype and not ctype.startswith('image/'): return None
+            data=bytearray()
+            while len(data)<=MAX_BYTES:
+                chunk=resp.read(65536)
+                if not chunk: break
+                data.extend(chunk)
+            if not data or len(data)>MAX_BYTES: return None
+            im=Image.open(io.BytesIO(data)).convert('RGB')
+            if min(im.size)<80: return None
+            im.thumbnail((1000,1000),Image.Resampling.LANCZOS); im.save(path,'JPEG',quality=85,optimize=True); return path
+        finally:
+            resp.close(); conn.close()
     except Exception:
         logger.warning("Web image download failed for %s", url, exc_info=True)
         return None

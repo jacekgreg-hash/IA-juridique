@@ -1,5 +1,10 @@
+import io
 import os
 import time
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from PIL import Image
 
 from ocr_utils import clean_text, keep, fallback_scale
 from server.ocr.paddle_client import filter_by_score
@@ -41,6 +46,113 @@ def test_ssrf_guard_blocks_private_and_non_http():
 
 def test_ssrf_guard_allows_public_literal_ip():
     assert visual_web.is_public_url('https://93.184.216.34/img.jpg')
+
+
+# --- V3.6 : épinglage DNS anti-rebinding (§ sécurité avant exposition) ---
+
+def test_resolve_public_refuse_localhost():
+    assert visual_web._resolve_public('localhost', 80) is None
+
+
+def _serveur_local(handler_class):
+    """Démarre un serveur HTTP local éphémère ; retourne (serveur, base_url)."""
+    serveur = ThreadingHTTPServer(('127.0.0.1', 0), handler_class)
+    thread = threading.Thread(target=serveur.serve_forever, daemon=True)
+    thread.start()
+    return serveur, f'http://127.0.0.1:{serveur.server_port}'
+
+
+def test_fetch_refuse_localhost_meme_avec_serveur_local():
+    # Un serveur tourne bien sur 127.0.0.1 — le téléchargement doit être REFUSÉ :
+    # la résolution de « localhost » ne donne pas d'IP public.
+    class _H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.send_header('Content-Type', 'image/jpeg'); self.end_headers()
+            self.wfile.write(b'x')
+        def log_message(self, *a): pass
+
+    serveur, base = _serveur_local(_H)
+    try:
+        url = base.replace('127.0.0.1', 'localhost')
+        assert visual_web._fetch(url) is None
+        assert visual_web.download_image(url) is None
+    finally:
+        serveur.shutdown()
+
+
+def test_fetch_epingle_lip_et_transmet_le_bon_host(tmp_path, monkeypatch):
+    # La résolution est contournée (IP « vérifié » simulé) : la connexion se
+    # fait SUR CET IP avec le Host d'origine — comportement de l'épinglage.
+    vus = {}
+
+    class _H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            vus['host'] = self.headers.get('Host')
+            vus['ua'] = self.headers.get('User-Agent')
+            buf = io.BytesIO()
+            Image.new('RGB', (120, 120), 'red').save(buf, 'JPEG')
+            corps = buf.getvalue()
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/jpeg')
+            self.send_header('Content-Length', str(len(corps)))
+            self.end_headers()
+            self.wfile.write(corps)
+        def log_message(self, *a): pass
+
+    serveur, base = _serveur_local(_H)
+    monkeypatch.setattr(visual_web, 'CACHE_DIR', tmp_path)
+    monkeypatch.setattr(visual_web, '_resolve_public', lambda h, p: '127.0.0.1')
+    try:
+        # L'URL nomme un hôte fictif ; l'IP épinglé est 127.0.0.1 (simulé).
+        url = base.replace('127.0.0.1', 'hote-public.example') + '/img.jpg'
+        chemin = visual_web.download_image(url)
+        assert chemin is not None and chemin.exists()
+        assert vus.get('host') == 'hote-public.example'   # Host d'origine transmis
+        assert vus.get('ua', '').startswith('RITA-Vision')
+    finally:
+        serveur.shutdown()
+
+
+def test_fetch_redirection_vers_ip_prive_refusee():
+    # La cible initiale est « publique » (IP épinglé simulé) mais redirige vers
+    # un IP privé : le saut suivant doit être refusé (résolution -> refus).
+    class _H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header('Location', 'http://192.168.0.5/x.jpg')
+            self.end_headers()
+        def log_message(self, *a): pass
+
+    serveur, base = _serveur_local(_H)
+    monkeypatch_ip = '127.0.0.1'
+    orig = visual_web._resolve_public
+    try:
+        import server.candidates.visual_web as vw
+        # Premier saut : IP « public » simulé ; le suivant re-résout vraiment.
+        appel = {'n': 0}
+        def faux(hostname, port):
+            appel['n'] += 1
+            if appel['n'] == 1:
+                return monkeypatch_ip
+            return orig(hostname, port)
+        vw._resolve_public = faux
+        assert visual_web._fetch(base + '/img.jpg') is None
+    finally:
+        vw._resolve_public = orig
+        serveur.shutdown()
+
+
+def test_fetch_refuse_erreur_http():
+    class _H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(404); self.end_headers()
+        def log_message(self, *a): pass
+
+    serveur, base = _serveur_local(_H)
+    try:
+        assert visual_web._fetch(base + '/x.jpg') is None
+    finally:
+        serveur.shutdown()
 
 
 def test_purge_cache(tmp_path, monkeypatch):
