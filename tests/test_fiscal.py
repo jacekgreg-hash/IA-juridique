@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from server.tariff.fiscal import DB_PATH, taux_estime
+from server.tariff.fiscal import DB_PATH, question_origine, taux_estime
 
 pytestmark = pytest.mark.skipif(
     not Path(DB_PATH).exists(),
@@ -80,6 +80,62 @@ def test_fiscal_refus_code_invalide():
     r = taux_estime('12', 'CN')
     assert r['statut'] == 'impossible'
     assert 'code' in r['raison']
+
+
+# --- origine préférentielle : jamais automatique (§16) ---
+
+def test_fiscal_preference_exige_justificatifs():
+    # Viêt Nam : le taux préférentiel ne remplace pas silencieusement le taux
+    # plein — les deux sont donnés, les justificatifs sont listés.
+    r = taux_estime('6403 19 00', 'VN')
+    assert r['taux_sans_preference'] == 0.08       # taux plein, toujours visible
+    assert r['taux_estime'] == 0.0                 # estimation AVEC justificatif
+    assert r['taux_sans_justificatif'] == 0.08     # et le même SANS justificatif
+    assert r['justificatifs_requis']
+    assert any('EUR.1' in j or 'facture' in j for j in r['justificatifs_requis'])
+    assert any('règles d\'origine' in j for j in r['justificatifs_requis'])
+
+
+def test_fiscal_gsp_mentionne_rex():
+    # GSP (SPG) : le registre REX est exigé — vérifié sur un code avec
+    # préférence SPG (chaussures sport cuir, groupe « GSP - General arrangements »).
+    r = taux_estime('6403 19 00', 'BD')            # Bangladesh = bénéficiaire GSP-EBA
+    if r['preference'] and 'GSP' in r['preference']['groupe'].upper():
+        assert any('REX' in j for j in r['justificatifs_requis'])
+
+
+def test_fiscal_sans_preference_pas_de_justificatifs():
+    r = taux_estime('6403 19 00', 'US')
+    assert r['preference'] is None
+    assert r['justificatifs_requis'] == []
+    assert 'taux_sans_justificatif' not in r
+
+
+def test_question_origine():
+    q = question_origine()
+    assert q['champ'] == 'origine'
+    assert 'justificatif' in q['impact'].lower()
+
+
+def test_enrichir_droits_sans_origine_pose_la_question():
+    from server.api.routes import _enrichir_droits
+    response = {'classement': {'candidats': [{'code': '6403 19 00'}, {'code': '6404 11 00'}],
+                               'questions': [], 'informations_manquantes': []}}
+    _enrichir_droits(response, None)
+    assert 'droits' not in response
+    assert response['classement']['questions'][-1]['champ'] == 'origine'
+    assert 'origine' in response['classement']['informations_manquantes'][-1]
+
+
+def test_enrichir_droits_avec_origine():
+    from server.api.routes import _enrichir_droits
+    response = {'classement': {'candidats': [{'code': '6403 19 00'}, {'code': '6404 11 00'}]}}
+    _enrichir_droits(response, 'VN')
+    droits = response['droits']
+    assert set(droits) == {'6403 19 00', '6404 11 00'}
+    assert droits['6403 19 00']['taux_estime'] == 0.0          # AVEC justificatif
+    assert droits['6403 19 00']['taux_sans_justificatif'] == 0.08
+    assert droits['6404 11 00']['justificatifs_requis']        # idem textile
 
 
 # --- route API ---

@@ -1,7 +1,7 @@
 import os, tempfile, time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from PIL import Image
 from server.candidates.engine import search_candidates
 from server.candidates.external import search_external
@@ -10,12 +10,12 @@ from server.fusion.engine import fuse
 from server.ocr.select import ocr_detailed
 from server.persistence import store
 from server.tariff.engine import propose_classement
-from server.tariff.fiscal import taux_estime
+from server.tariff.fiscal import question_origine, taux_estime
 from server.vision.enrich import enrich_vision
 from server.vision.select import MODEL, analyze
 
 router=APIRouter()
-APP_VERSION='3.2.0'
+APP_VERSION='3.3.0'
 VERSION=(f'RITA Vision V{APP_VERSION} — moteurs interchangeables '
          f'(vision: {os.getenv("VISION_ENGINE","florence")}, ocr: {os.getenv("OCR_ENGINE","paddle")}, '
          f'llm: {os.getenv("TEXT_LLM_PROVIDER","ollama")}) + SearXNG + fusion de preuves')
@@ -51,8 +51,11 @@ def _read_upload(image: UploadFile) -> Path:
 
 # `def` (et non `async def`) : tout le traitement est bloquant (vision, requests, LLM).
 # FastAPI l'exécute dans son pool de threads au lieu de figer la boucle d'événements.
+# `origine` est facultatif : sans elle, l'analyse ajoute une question ciblée (§31.3)
+# et n'affiche que le droit de pays tiers indicatif ; avec elle, le moteur fiscal
+# estime les droits par candidat (§16) — la préférence reste SUR JUSTIFICATIF.
 @router.post('/api/v1/analysis')
-def analysis(image: UploadFile=File(...)):
+def analysis(image: UploadFile=File(...), origine: str=Form(None)):
     path=_read_upload(image)
     started=time.time()
     try:
@@ -106,6 +109,7 @@ def analysis(image: UploadFile=File(...)):
         # V3 : classification tarifaire (§9/§10/§11) — moteur séparé de l'IA, base
         # de données séparée du code, candidats multiples et questions ciblées.
         response['classement']=propose_classement(response['produit'],vision['fast'].get('caption') or '',ocr_text)
+        _enrichir_droits(response,origine)
         # V3 : persistance (§20/§21/§24) — l'analyse est conservée et devient
         # consultable via GET /api/v1/history et GET /api/v1/analysis/{id}.
         try:
@@ -120,6 +124,29 @@ def analysis(image: UploadFile=File(...)):
     finally:
         try:path.unlink()
         except OSError:pass
+
+def _enrichir_droits(response: dict, origine: str | None) -> None:
+    """Branche le moteur fiscal (§16) sur les candidats du classement.
+
+    Sans origine : question ciblée (§31.3) — les droits dépendent de l'origine
+    et la préférence n'est jamais automatique (justificatifs requis).
+    Avec origine : estimation par candidat (3 premiers) ; une erreur du moteur
+    fiscal ne doit jamais casser l'analyse (même politique que la persistance).
+    """
+    classement=response.get('classement') or {}
+    codes=[c['code'] for c in (classement.get('candidats') or [])[:3]]
+    if not codes:
+        return
+    if not origine:
+        classement.setdefault('questions',[]).append(question_origine())
+        classement.setdefault('informations_manquantes',[]).append("origine de la marchandise (pour l'estimation des droits)")
+        return
+    try:
+        response['droits']={code:taux_estime(code,origine) for code in codes}
+    except FileNotFoundError:
+        response['droits']={'statut':'indisponible','raison':'base fiscale absente — lancer tools/import_taric.py'}
+    except Exception as exc:
+        response['droits']={'statut':'erreur','raison':f'{type(exc).__name__}: {exc}'}
 
 # --- V3 : historique et consultation (§20 GET /history, GET /analysis/{id}) ---
 

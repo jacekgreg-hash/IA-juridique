@@ -122,10 +122,12 @@ def taux_estime(code: str, origine: str) -> dict:
         'origine': str(origine or '').strip(),
         'origine_iso': None,
         'droit_pays_tiers': None,
+        'taux_sans_preference': None,
         'preference': None,
         'suspension': None,
         'antidumping': None,
         'taux_estime': None,
+        'justificatifs_requis': [],
         'explication': [],
         'avertissement': 'Vérification officielle requise (TARIC/Access2Markets) : les préférences '
                          'supposent des preuves d\'origine et des règles d\'origine respectées ; '
@@ -156,6 +158,7 @@ def taux_estime(code: str, origine: str) -> dict:
         tiers = next((m for m in toutes if m['type'] == '103'), None)
         if tiers:
             result['droit_pays_tiers'] = _detail(tiers)
+            result['taux_sans_preference'] = tiers['taux']
             result['explication'].append(
                 f"Droit de pays tiers ({tiers['brut']}) : s'applique sans préférence.")
 
@@ -176,9 +179,14 @@ def taux_estime(code: str, origine: str) -> dict:
                 result['explication'].append(
                     'Autres préférences applicables : ' + ', '.join(
                         f"{m['brut']} ({m['geo_nom']})" for m in autres) + '.')
+            # L'origine préférentielle N'est PAS automatique (§16) : elle exige
+            # un justificatif d'origine et le respect des règles de l'accord.
             result['explication'].append(
-                f"Préférence applicable ({nom_geo} : {meilleure['brut']}) — sous réserve de "
-                "preuves d'origine conformes aux règles de l'accord.")
+                f"Préférence possible ({nom_geo} : {meilleure['brut']}) — UNIQUEMENT sur "
+                'justificatif d\'origine et si les règles d\'origine de l\'accord sont '
+                f"respectées ; sans justificatif, le droit applicable est "
+                f"{result['droit_pays_tiers']['brut'] if result['droit_pays_tiers'] else 'le droit de pays tiers'}.")
+            result['justificatifs_requis'] = _justificatifs(nom_geo)
 
         # Suspension (information, cas d'application restreints).
         susp = next((m for m in toutes if m['type'] == '117'), None)
@@ -203,21 +211,28 @@ def taux_estime(code: str, origine: str) -> dict:
                 f"Droit antidumping définitif pour {iso} ({ads[-1]['brut']}) : s'ajoute au droit "
                 'de base ; taux variable selon les entreprises (codes additionnels).')
 
-        # Estimation : préférence sinon pays tiers ; l'antidumping s'ajoute.
+        # Estimation : préférence (si justifiée) sinon pays tiers ; l'antidumping s'ajoute.
         base = result['preference'] or result['droit_pays_tiers']
+        ad_max = result['antidumping']['taux_max'] if result['antidumping'] else None
         if base and base['taux'] is not None:
-            total = base['taux']
-            if result['antidumping'] and result['antidumping']['taux_max'] is not None:
-                total += result['antidumping']['taux_max']
+            total = base['taux'] + (ad_max or 0)
+            if result['preference'] and result['taux_sans_preference'] is not None:
+                sans_justif = result['taux_sans_preference'] + (ad_max or 0)
+                result['taux_sans_justificatif'] = round(sans_justif, 4)
                 result['explication'].append(
-                    "Estimation prudente : droit de base + antidumping maximal (le taux par "
+                    f"Estimation AVEC justificatif d'origine ({base['brut']}"
+                    + (f" + antidumping {result['antidumping']['brut']}" if result['antidumping'] else '')
+                    + f") = {_pct(total)} ; SANS justificatif = {_pct(sans_justif)}.")
+            else:
+                result['explication'].append(
+                    f"Taux estimé ({base['brut']}"
+                    + (f" + antidumping {result['antidumping']['brut']}" if result['antidumping'] else '')
+                    + f") = {_pct(total)} ad valorem.")
+            if ad_max is not None:
+                result['explication'].append(
+                    "Estimation prudente : antidumping maximal retenu (le taux par "
                     'entreprise sera révisé à la déclaration).')
             result['taux_estime'] = round(total, 4)
-            base_nom = 'préférence' if result['preference'] else 'droit de pays tiers'
-            result['explication'].append(
-                f"Taux estimé ({base_nom} {base['brut']}"
-                + (f" + antidumping {result['antidumping']['brut']}" if result['antidumping'] else '')
-                + ') = ' + f"{result['taux_estime'] * 100:.3f} %".rstrip('0').rstrip('.') + ' ad valorem.')
         elif base:
             result['explication'].append(
                 f"Droit non ad valorem ({base['brut']}) : le taux ne peut pas être sommé "
@@ -225,6 +240,38 @@ def taux_estime(code: str, origine: str) -> dict:
         return result
     finally:
         con.close()
+
+
+def _pct(taux: float) -> str:
+    return f"{taux * 100:.3f} %".rstrip('0').rstrip('.')
+
+
+def _justificatifs(groupe: str) -> list[str]:
+    """Justificatifs exigés pour l'origine préférentielle (jamais automatique, §16).
+
+    La forme exacte dépend de l'accord : le moteur la précise pour les cas
+    connus (GSP => REX) et renvoie sinon à la documentation de l'accord.
+    """
+    docs = ["Preuve d'origine conforme à l'accord (certificat EUR.1 ou déclaration "
+           "d'origine sur la facture/autre document commercial) ;",
+           'respect des règles d\'origine de l\'accord (transformation suffisante, '
+           'non-altération, transport direct selon les termes de l\'accord).']
+    if 'GSP' in str(groupe or '').upper():
+        docs.insert(0, "Inscription de l'exportateur au registre REX (numéro REX "
+                       "mentionné sur la déclaration d'origine) — système du SPG ;")
+    return docs
+
+
+def question_origine() -> dict:
+    """Question ciblée (§31.3) : l'origine permet d'estimer les droits (§16)."""
+    return {
+        'champ': 'origine',
+        'question': "Quel est le pays d'origine de la marchandise (lieu de production, "
+                    'et non simplement le pays d\'expédition) ?',
+        'impact': "permet d'estimer les droits d'importation (droit de pays tiers, "
+                  'préférence éventuelle SUR JUSTIFICATIF d\'origine, antidumping) ; '
+                  "sans origine, seul le droit de pays tiers indicatif est affiché",
+    }
 
 
 def _detail(m: sqlite3.Row) -> dict:
