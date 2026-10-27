@@ -31,6 +31,7 @@ Sans argument, prend le eu-taric-*.zip le plus récent dans data/tariff/raw/.
 """
 from __future__ import annotations
 
+import csv
 import gc
 import json
 import re
@@ -50,6 +51,7 @@ OUT_NOMENCLATURE = ROOT / 'data' / 'tariff' / 'nomenclature_fr.json'
 OUT_BASE = ROOT / 'data' / 'tariff' / 'tariff_base.json'
 OUT_FISCAL = ROOT / 'data' / 'tariff' / 'fiscal.sqlite'
 OUT_NOTES = ROOT / 'data' / 'tariff' / 'notes_cn_fr.json'
+OUT_EBTI = ROOT / 'data' / 'tariff' / 'ebti.sqlite'
 
 # Types de mesures conservés pour le moteur fiscal (§16) — codes TARIC
 # officiels : 103 droit de pays tiers, 142 préférence tarifaire,
@@ -311,7 +313,7 @@ def _droit_cascade(code10: str, parents: list[str], droits: dict[str, dict]) -> 
 # --- Écriture des sorties -------------------------------------------------------
 
 def _ecrire_nomenclature(entrees, declarables, droits, version, reference):
-    print(f"[7/7] Écriture de {OUT_NOMENCLATURE.name} et {OUT_BASE.name}...")
+    print(f"[7/8] Écriture de {OUT_NOMENCLATURE.name} et {OUT_BASE.name}...")
     codes = []
     for e in entrees:
         # Codes déclarables en douane (suffixe 80 + IS_LEAF=1) : CN8 et TARIC10.
@@ -402,7 +404,7 @@ def _ecrire_fiscal(z: zipfile.ZipFile, version: str, reference: str) -> None:
     * groupes(geo, nom) — nom FR des groupes d'origine.
     * meta(clé, valeur) — version TARIC et date de référence.
     """
-    print('[5/7] Construction de la base fiscale...')
+    print('[5/8] Construction de la base fiscale...')
     aujourd_hui = date.today()
     OUT_FISCAL.unlink(missing_ok=True)
     con = sqlite3.connect(OUT_FISCAL)
@@ -486,11 +488,11 @@ def _ecrire_notes() -> None:
     """
     candidats_html = sorted(RAW_DIR.glob('cnen-fr*.html'))
     if not candidats_html:
-        print('[6/7] Notes explicatives : aucun cnen-fr*.html dans data/tariff/raw/ — ignorées.')
+        print('[6/8] Notes explicatives : aucun cnen-fr*.html dans data/tariff/raw/ — ignorées.')
         OUT_NOTES.unlink(missing_ok=True)
         return
     chemin = candidats_html[-1]
-    print(f'[6/7] Notes explicatives : {chemin.name}...')
+    print(f'[6/8] Notes explicatives : {chemin.name}...')
     t = chemin.read_bytes().decode('utf-8', errors='replace')
     code_re = re.compile(r'\b\d{4}(?: \d{2}){0,2}\b')
 
@@ -530,6 +532,87 @@ def _ecrire_notes() -> None:
     print(f"      {len(segments)} segments -> {OUT_NOTES.name} ({OUT_NOTES.stat().st_size / 1e6:.1f} Mo)")
 
 
+# --- Renseignements tarifaires contraignants (RTC/EBTI) ------------------------
+
+def _ecrire_ebti() -> None:
+    """ebti.sqlite : décisions RTC valides (EBTI, langue FR) — niveau 3 de preuve.
+
+    Source : DDS2-EBTI_Full.zip (base publique des renseignements tarifaires
+    contraignants, miroir taric-opendata) déposé dans data/tariff/raw/.
+    Un RTC décide du classement d'un bien précis ; RITA ne l'utilise que pour
+    CONFORTER un candidat dont le code est couvert par un RTC à la description
+    similaire — jamais pour classer à la place de l'utilisateur (§29).
+
+    Code de nomenclature : 10 chiffres + jokers '*' (positions non spécifiées)
+    ; `mask10` garde les 10 premières positions, `prefix` les chiffres certains.
+    Mémoire : lecture CSV en flux (machine cible : 6 Go de RAM).
+    """
+    candidats = sorted(RAW_DIR.glob('ebti-full*.zip'))
+    if not candidats:
+        print('[8/8] EBTI : aucun ebti-full*.zip dans data/tariff/raw/ — ignoré.')
+        OUT_EBTI.unlink(missing_ok=True)
+        return
+    print(f'[8/8] EBTI : {candidats[-1].name}...')
+    OUT_EBTI.unlink(missing_ok=True)
+    con = sqlite3.connect(OUT_EBTI)
+    con.executescript("""
+        CREATE TABLE rti (ref TEXT, pays TEXT, debut TEXT, fin TEXT,
+            mask10 TEXT, prefix TEXT, description TEXT);
+        CREATE INDEX idx_rti_prefix ON rti(prefix);
+        CREATE TABLE meta (cle TEXT, valeur TEXT);
+    """)
+    aujourdhui = date.today()
+    total = garde = 0
+    lot: list[tuple] = []
+    z = zipfile.ZipFile(candidats[-1])
+    for nom in sorted(n for n in z.namelist() if re.fullmatch(r'EBTI_\d{4}\.csv', n)):
+        with z.open(nom) as f:
+            lecteur = csv.reader(io.TextIOWrapper(f, encoding='utf-8-sig', newline=''))
+            entete = next(lecteur, None)
+            if not entete:
+                continue
+            # L'en-tête contient une coquille (« DATE_OF _ISSUE ») : indexer par nom.
+            idx = {c.strip().upper(): i for i, c in enumerate(entete)}
+            for row in lecteur:
+                if len(row) != len(entete):
+                    continue
+                total += 1
+                if row[idx['STATUS']] != 'VALID' or row[idx['LANGUAGE']].lower() != 'fr':
+                    continue
+                fin = _parse_date(row[idx['END_DATE_OF_VALIDITY']]) or None
+                if fin and fin < aujourdhui:
+                    continue
+                brut = row[idx['NOMENCLATURE_CODE']] or ''
+                digits = re.sub(r'[^0-9]', '', brut)
+                if len(digits) < 8:
+                    continue  # au moins une position CN8 doit être spécifiée
+                mask10 = (brut + '*' * 10)[:10]
+                etoile = mask10.find('*')
+                prefix = mask10 if etoile == -1 else mask10[:etoile]
+                if not re.fullmatch(r'\d+', prefix):
+                    continue
+                description = _nettoie_texte(row[idx['DESCRIPTION_OF_GOODS']])[:2000]
+                lot.append((row[idx['BTI_REFERENCE']], row[idx['ISSUING_COUNTRY']],
+                            row[idx['START_DATE_OF_VALIDITY']] or '',
+                            row[idx['END_DATE_OF_VALIDITY']] or '',
+                            mask10, prefix, description))
+                garde += 1
+                if len(lot) >= 2000:
+                    con.executemany('INSERT INTO rti VALUES (?,?,?,?,?,?,?)', lot)
+                    lot.clear()
+        con.commit()
+        print(f'      {nom} : {garde} RTC conservées (cumul)')
+    z.close()
+    if lot:
+        con.executemany('INSERT INTO rti VALUES (?,?,?,?,?,?,?)', lot)
+    con.executemany('INSERT INTO meta VALUES (?,?)',
+                    [('source', 'Base publique EBTI (DDS2-EBTI_Full) — RTC valides, langue FR'),
+                     ('date_import', date.today().isoformat())])
+    con.commit()
+    con.close()
+    print(f'      {garde}/{total} lignes -> {OUT_EBTI.name} ({OUT_EBTI.stat().st_size / 1e6:.1f} Mo)')
+
+
 def main() -> None:
     z, chemin = _lire_zip()
     version, reference = _version(chemin), _reference(chemin)
@@ -546,6 +629,7 @@ def main() -> None:
     _ecrire_fiscal(z, version, reference)
     z.close()
     _ecrire_notes()
+    _ecrire_ebti()
     print('Terminé.')
 
 

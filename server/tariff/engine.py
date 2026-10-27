@@ -23,6 +23,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from server.tariff.search import rechercher
+from server.tariff.rti import conforter
 
 _BASE_PATH = Path(__file__).resolve().parents[2] / 'data' / 'tariff' / 'tariff_base.json'
 
@@ -112,6 +113,7 @@ def propose_classement(produit: dict, caption: str = '', ocr_text: list | None =
             result['statut'] = 'candidats_a_departager'
             result['candidats'] = recherche['candidats']
             result['recherche'] = recherche.get('source', 'designation')
+            conforter(result['candidats'], texts)
             result['questions'] = [{'champ': 'nature',
                                    'question': 'Quelle est la nature précise de la marchandise ?',
                                    'impact': "confirme ou écarte les positions trouvées par recherche "
@@ -140,6 +142,7 @@ def propose_classement(produit: dict, caption: str = '', ocr_text: list | None =
             score -= 0.05
         cands.append({
             'code': entry['code'],
+            'code10': entry.get('code10'),
             'designation': entry['designation'],
             'confiance': round(max(0.0, min(0.9, score)), 2),
             'raisons': [raison],
@@ -150,6 +153,11 @@ def propose_classement(produit: dict, caption: str = '', ocr_text: list | None =
     cands.sort(key=lambda c: (-c['confiance'], c['code']))
 
     result['candidats'] = cands
+    # Niveau 3 de preuve : les RTC (décisions contraignantes) confortent les
+    # candidats couverts par un RTC à la description similaire (§29 : confort,
+    # jamais classement automatique). La nature fait partie des textes du
+    # recoupement (elle porte l'essentiel du vocabulaire du bien).
+    conforter(cands, [nature] + texts)
     if not value:
         # §11 + §31.3 : on n'invente pas, on demande le critère qui départage.
         question_text = family.get(f'question_{discriminant}') or f"Quelle est la valeur de « {discriminant} » ?"

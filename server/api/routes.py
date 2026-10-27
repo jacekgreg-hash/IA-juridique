@@ -15,7 +15,7 @@ from server.vision.enrich import enrich_vision
 from server.vision.select import MODEL, analyze
 
 router=APIRouter()
-APP_VERSION='3.6.0'
+APP_VERSION='3.7.0'
 VERSION=(f'RITA Vision V{APP_VERSION} — moteurs interchangeables '
          f'(vision: {os.getenv("VISION_ENGINE","florence")}, ocr: {os.getenv("OCR_ENGINE","paddle")}, '
          f'llm: {os.getenv("TEXT_LLM_PROVIDER","ollama")}) + SearXNG + fusion de preuves')
