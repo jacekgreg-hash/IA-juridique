@@ -12,7 +12,12 @@ from server.persistence import store
 from server.tariff.engine import propose_classement
 from server.tariff.fiscal import question_origine, taux_estime
 from server.vision.enrich import enrich_vision
-from server.vision.select import MODEL, analyze
+from server.vision.select import analyze
+
+# MODEL est maintenant déterminé dynamiquement selon le moteur utilisé
+# Pour la rétrocompatibilité avec d'autres parties du code, on garde une valeur par défaut
+import os
+MODEL = os.getenv('VISION_ENGINE', 'mistral')  # Default engine, not actual model
 
 router=APIRouter()
 APP_VERSION='3.8.0'
@@ -115,6 +120,26 @@ def analysis(image: UploadFile=File(...), origine: str=Form(None)):
         response['ocr_details']=ocr_detail
         response['perception']={'legende':vision['fast'].get('caption'),'objet_legende':vision['fast'].get('objet_legende'),
                                 'marque_source':vision['fast'].get('marque_source'),'couleurs':vision['fast'].get('couleurs')}
+        
+        # === NOUVEAU V3.9.1 : Métadonnées des moteurs utilisés et fallback ===
+        # Propager les métadonnées de fallback depuis vision et ocr
+        if 'meta' not in response:
+            response['meta'] = {}
+        
+        # Moteur vision utilisé (mistral, florence, ou fallback)
+        vision_meta = vision.get('meta', {})
+        if vision_meta.get('vision_engine_used'):
+            response['meta']['vision_engine_used'] = vision_meta['vision_engine_used']
+        if vision_meta.get('vision_fallback_warning'):
+            response['meta']['vision_fallback_warning'] = vision_meta['vision_fallback_warning']
+        
+        # Moteur OCR utilisé (mistral, paddle, ou fallback)
+        ocr_meta = ocr_detail.get('meta', {})
+        if ocr_meta.get('ocr_engine_used'):
+            response['meta']['ocr_engine_used'] = ocr_meta['ocr_engine_used']
+        if ocr_meta.get('ocr_fallback_warning'):
+            response['meta']['ocr_fallback_warning'] = ocr_meta['ocr_fallback_warning']
+        
         # Une seule identification unifiée (cahier des charges, section 17) : la décision
         # fondée sur les preuves est reflétée dans `produit`, sans jamais écrire « confirme ».
         apply_candidate_decision_to_produit(response['produit'],decision,candidate_search)
