@@ -29,7 +29,19 @@ _apply_candidate_decision_to_produit=apply_candidate_decision_to_produit
 
 @router.get('/health')
 def health():
-    return {'status':'ok','service':VERSION,'vision_model':MODEL}
+    from server.security.auth import AUTH_ENABLED
+    from server.security.rate_limit import RATE_LIMIT
+    from server.security.logging import LOG_ACCESS_ENABLED
+    return {
+        'status': 'ok',
+        'service': VERSION,
+        'vision_model': MODEL,
+        'security': {
+            'auth_enabled': AUTH_ENABLED,
+            'rate_limit': RATE_LIMIT,
+            'access_logging': LOG_ACCESS_ENABLED,
+        },
+    }
 
 def _read_upload(image: UploadFile) -> Path:
     """Copie l'upload dans un fichier temporaire après contrôle de taille et de contenu."""

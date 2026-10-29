@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from dotenv import load_dotenv
 load_dotenv()
 from server.api.routes import router, APP_VERSION
+from server.security.middleware import SecurityMiddleware
 
 logger = logging.getLogger('rita')
 
@@ -26,4 +27,20 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title='RITA Vision API', version=APP_VERSION + '-moteurs-interchangeables', lifespan=lifespan)
+
+# Ajouter les middlewares de sécurité
+# Pour FastAPI, les middlewares doivent être ajoutés avant include_router
+# et doivent suivre la signature Starlette : __call__(self, request, call_next)
+from server.security.rate_limit import RateLimitMiddleware
+from server.security.auth import AUTH_ENABLED
+from server.security.auth_middleware import AuthMiddleware
+from server.security.logging import AccessLogMiddleware
+
+# Utiliser app.middleware('http') pour ajouter des middlewares simples
+# Ordre : rate_limit -> auth -> logging (le premier ajouté est le plus externe)
+app.middleware('http')(RateLimitMiddleware())
+if AUTH_ENABLED:
+    app.middleware('http')(AuthMiddleware())
+app.middleware('http')(AccessLogMiddleware())
+
 app.include_router(router)
