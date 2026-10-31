@@ -5,6 +5,8 @@ __pycache__/
 
 # Environnement / secrets (jamais commités)
 .env
+.env.local
+*.log
 
 # Fichiers locaux de machine
 *.lnk
